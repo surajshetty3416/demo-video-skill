@@ -6,6 +6,18 @@ The trick: instead of recording in real time, a Playwright script drives the app
 
 The compositor adds the "ScreenStudio look": gradient background, rounded panel with soft shadow, a crisp vector cursor, click pulse rings, and smooth eased zoom/pan. `HD=1` re-renders the same capture at retina resolution.
 
+## What it produces
+
+A short storyline against a simple form page:
+
+![Feedback form demo](media/feedback-form.gif)
+
+The multi-case "tile" pattern from `example-multicase.py`, showcasing five drag-reorder behaviors of [Frappe Builder](https://github.com/frappe/builder) in one take:
+
+![Canvas reorder demo](media/canvas-reorder.gif)
+
+The GIFs above are downscaled 25fps previews. The real output is 60fps H.264: [feedback-form.mp4](media/feedback-form.mp4), [canvas-reorder.mp4](media/canvas-reorder.mp4) (download to play, GitHub does not inline-play committed videos).
+
 ## Install
 
 ```sh
