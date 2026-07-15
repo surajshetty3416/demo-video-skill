@@ -16,7 +16,7 @@ The multi-case "tile" pattern from `example-multicase.py`, showcasing five drag-
 
 [![Canvas reorder demo](media/canvas-reorder.gif)](media/canvas-reorder.mp4)
 
-The inline GIFs are 20fps previews (GitHub only inline-plays videos uploaded through its web editor, not files committed to a repo). Click a preview to open the real 60fps H.264 output, which GitHub plays on the file page.
+The inline GIFs are 20fps previews (GitHub only inline-plays videos uploaded through its web editor, not files committed to a repo). **[Watch the real 60fps output in your browser](https://surajshetty3416.github.io/demo-video-skill/)**, or grab the mp4s from [media/](media).
 
 ## Install
 
