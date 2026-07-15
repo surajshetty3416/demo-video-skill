@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>demo-video · sample output</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    background: linear-gradient(135deg, #eef2ff, #ede9fe 50%, #fae8ff);
+    color: #0f172a; min-height: 100vh; padding: 56px 24px;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 30px; letter-spacing: -0.02em; }
+  .sub { color: #475569; margin-top: 8px; font-size: 16px; line-height: 1.5; }
+  .sub a { color: #4f46e5; }
+  section { margin-top: 44px; }
+  h2 { font-size: 19px; letter-spacing: -0.01em; }
+  p.cap { color: #64748b; font-size: 14.5px; margin: 6px 0 14px; }
+  video {
+    width: 100%; border-radius: 14px; display: block;
+    box-shadow: 0 8px 30px rgba(15,23,42,.18);
+  }
+  footer { margin-top: 52px; color: #64748b; font-size: 14px; }
+  footer a { color: #4f46e5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>demo-video</h1>
+  <div class="sub">Sample output of the <a href="https://github.com/surajshetty3416/demo-video-skill">demo-video Claude Code skill</a>:
+    true 60fps demo videos rendered from deterministic Playwright frames by a Pillow compositor. These are the raw mp4s, untouched.</div>
+
+  <section>
+    <h2>Feedback form</h2>
+    <p class="cap">Chip toggles with click pulse rings, per-frame typing, submit spinner, animated success state. Reproducible from <code>examples/feedback-form/</code> in the repo.</p>
+    <video src="feedback-form.mp4" controls autoplay muted loop playsinline></video>
+  </section>
+
+  <section>
+    <h2>Canvas block reorder</h2>
+    <p class="cap">The multi-case "tile" pattern from <code>example-multicase.py</code>: five drag-reorder behaviors of Frappe Builder in one take.</p>
+    <video src="canvas-reorder.mp4" controls muted loop playsinline></video>
+  </section>
+
+  <footer>Made with the <a href="https://github.com/surajshetty3416/demo-video-skill">demo-video skill</a>.</footer>
+</div>
+</body>
+</html>
