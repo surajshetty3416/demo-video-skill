@@ -10,13 +10,19 @@ The compositor adds the "ScreenStudio look": gradient background, rounded panel 
 
 A fully scripted storyline: chip toggles with click pulse rings, per-frame typing, a submit spinner, and an animated success state. Runs against a [self-contained fixture page](examples/feedback-form), so you can reproduce it locally with `VIDEO_DIR=/abs/workdir python examples/feedback-form/capture.py`:
 
-[![Feedback form demo](media/feedback-form.gif)](media/feedback-form.mp4)
+
+
+https://github.com/user-attachments/assets/aa91b948-5517-4d06-bbe3-300b72cf560d
+
+
 
 The multi-case "tile" pattern from `example-multicase.py`, showcasing five drag-reorder behaviors of [Frappe Builder](https://github.com/frappe/builder) in one take:
 
-[![Canvas reorder demo](media/canvas-reorder.gif)](media/canvas-reorder.mp4)
 
-The inline GIFs are 20fps previews (GitHub only inline-plays videos uploaded through its web editor, not files committed to a repo). **[Watch the real 60fps output in your browser](https://surajshetty3416.github.io/demo-video-skill/)**, or grab the mp4s from [media/](media).
+https://github.com/user-attachments/assets/ffce7b66-ae76-44ea-afe3-94649020c6cc
+
+
+
 
 ## Install
 
