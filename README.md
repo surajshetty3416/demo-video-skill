@@ -8,15 +8,15 @@ The compositor adds the "ScreenStudio look": gradient background, rounded panel 
 
 ## What it produces
 
-A short storyline against a simple form page:
+A fully scripted storyline: chip toggles with click pulse rings, per-frame typing, a submit spinner, and an animated success state. Runs against a [self-contained fixture page](examples/feedback-form), so you can reproduce it locally with `VIDEO_DIR=/abs/workdir python examples/feedback-form/capture.py`:
 
-![Feedback form demo](media/feedback-form.gif)
+[![Feedback form demo](media/feedback-form.gif)](media/feedback-form.mp4)
 
 The multi-case "tile" pattern from `example-multicase.py`, showcasing five drag-reorder behaviors of [Frappe Builder](https://github.com/frappe/builder) in one take:
 
-![Canvas reorder demo](media/canvas-reorder.gif)
+[![Canvas reorder demo](media/canvas-reorder.gif)](media/canvas-reorder.mp4)
 
-The GIFs above are downscaled 25fps previews. The real output is 60fps H.264: [feedback-form.mp4](media/feedback-form.mp4), [canvas-reorder.mp4](media/canvas-reorder.mp4) (download to play, GitHub does not inline-play committed videos).
+The inline GIFs are 20fps previews (GitHub only inline-plays videos uploaded through its web editor, not files committed to a repo). Click a preview to open the real 60fps H.264 output, which GitHub plays on the file page.
 
 ## Install
 
@@ -39,6 +39,7 @@ Then ask Claude Code to "make a demo video of ..." and it picks the skill up aut
 | `capture_template.py` | Copy-and-edit Playwright capture harness (camera + mouse timeline) |
 | `compositor.py` | Multiprocess Pillow renderer, streams frames into one ffmpeg process |
 | `example-multicase.py` | Complete working example of the multi-case "tile" pattern |
+| `examples/feedback-form/` | Self-contained runnable demo (fixture page + capture script), no app server needed |
 
 ## Using it without Claude Code
 
