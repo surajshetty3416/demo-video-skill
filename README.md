@@ -30,7 +30,7 @@ https://github.com/user-attachments/assets/ffce7b66-ae76-44ea-afe3-94649020c6cc
 git clone https://github.com/surajshetty3416/demo-video-skill ~/.claude/skills/demo-video
 ```
 
-Then ask Claude Code to "make a demo video of ..." and it picks the skill up automatically.
+Then ask Claude Code to "make a demo video of ..." and it picks the skill up automatically. It will ask you up front for the app URL, test login, and what flow to show, so have a dev server and a throwaway account handy.
 
 ## Requirements
 

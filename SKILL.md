@@ -22,6 +22,26 @@ size; `HD=1 python compositor.py …` re-renders the SAME capture at retina reso
 (uses all pixels of a DSF=2 capture) when a crisper deliverable is worth ~3x the
 composite time.
 
+## Step 0: ask the user for the inputs — don't go discover them
+
+The capture needs facts only the user reliably knows. Hunting for them (grepping configs
+for dev-server URLs, guessing test credentials, probing routes) burns time and tokens and
+often lands on the wrong instance. Before writing any code, ask for whatever is missing
+from this list, in ONE batch:
+
+1. **Target URL** — the running app / dev server to record (e.g. `http://myapp.localhost:8000`),
+   and the specific page or route the demo starts on.
+2. **Login** — credentials for a throwaway/test account, or an existing authenticated
+   session/storage state, or "no login needed".
+3. **What to show** — the feature/flow and the beats that matter (what must the viewer see?).
+4. **Fixture policy** — is it OK to create and delete throwaway records via the app's
+   API/UI on this instance? (Never demo against data the user cares about.)
+5. **Output** — where to put the mp4, and whether they want the retina `HD=1` render.
+
+Skip questions already answered by the request, project memory, or an obvious fixture
+(e.g. a self-contained HTML page needs neither URL nor login). If the user gives a
+production URL, confirm before creating any data on it.
+
 ## The core idea: deterministic frames = real 60fps
 
 Do **not** rely on real-time screen recording or Playwright's built-in video (framerate
@@ -109,6 +129,8 @@ working instance (a canvas block-reorder demo: 5 layout tiles + a center-drop fi
 
 ## Steps
 
+0. **Gather inputs** (Step 0 above): target URL, login, flow, fixture policy, output prefs —
+   ask the user in one batch rather than discovering them.
 1. **Copy the scripts** next to a scratch workdir: `capture_template.py`, `compositor.py`
    (and `example-multicase.py` if doing a tile demo).
 2. **Edit `capture_template.py` CONFIG** — `BASE`, `START_URL`, optional `LOGIN`, `VIEWPORT`
