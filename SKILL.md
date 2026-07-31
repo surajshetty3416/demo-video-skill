@@ -1,6 +1,6 @@
 ---
 name: demo-video
-description: Produce a polished, ScreenStudio-style 60fps product demo video of a web app with a tiny, dependency-light pipeline — Playwright frame capture + a multiprocess Pillow compositor streaming into ffmpeg (no Node/Remotion). Drives the app one step per frame so playback is true 60fps regardless of capture speed, then renders a gradient background, rounded panel + shadow, a crisp vector cursor, and smooth cinematic zoom/pan that holds steady during the action and eases out at the end; HD=1 re-renders the same capture at retina resolution. Use whenever asked to create/record/improve a demo video, walkthrough, feature showcase, or screencast of a web UI.
+description: Produce a polished, ScreenStudio-style 60fps product demo video of a web app with a tiny, dependency-light pipeline — Playwright frame capture + a multiprocess Pillow compositor streaming into ffmpeg (no Node/Remotion). Drives the app one step per frame so playback is true 60fps regardless of capture speed, then renders a gradient background, a rounded window with a soft shadow, a crisp vector cursor, click pulses, keyboard-shortcut keycaps, and a cinematic push-in that scales the whole window and eases out at the end; HD=1 re-renders the same capture at retina resolution. Use whenever asked to create/record/improve a demo video, walkthrough, feature showcase, or screencast of a web UI.
 ---
 
 # Demo video (deterministic frames → Pillow compositor → ffmpeg)
@@ -11,9 +11,10 @@ web app. Two stages, all code, only Python + Pillow + ffmpeg:
 ```
 capture_template.py  →  frames/f*.jpg  +  meta.json   (Playwright: 1 step per frame + camera/mouse timeline)
         │
-compositor.py        →  demo.mp4                       (multiprocess Pillow render — bg + rounded panel +
-                                                        shadow + crisp vector cursor + zoom/pan — streamed
-                                                        straight into ffmpeg; 60fps H.264, bt709)
+compositor.py        →  demo.mp4                       (multiprocess Pillow render — bg + rounded window +
+                                                        shadow, vector cursor, click pulses, shortcut
+                                                        keycaps, whole-window zoom/pan — streamed straight
+                                                        into ffmpeg; 60fps H.264, bt709)
 ```
 
 The compositor renders with a worker pool and pipes frames directly into one ffmpeg
@@ -60,10 +61,18 @@ transitions, drop animations, spinners), or the animation would freeze in the vi
 ## The camera lives in the compositor, not the app
 
 The capture records a **focus point + zoom per frame** into `meta.json`; the compositor
-crops+scales the recorded pixels to that virtual camera and eases toward it (EMA). So
+scales the recorded pixels to that virtual camera and eases toward it (EMA). So
 **re-framing / re-pacing / re-zooming is a compositor re-run, not a re-shoot** — you almost
 never need to re-capture just to change the camera. Never zoom the app's own canvas
 (`Ctrl+=`/wheel); it's fragile and forces re-captures.
+
+Zooming scales the **whole window** — frame, rounded corners and drop shadow included —
+against a fixed background, the way a real camera push-in looks. The window is not a
+fixed cut-out that content zooms inside of: past ~1.1x it grows beyond the frame and
+bleeds off the edges, so the gradient background is visible on the wide beats and the UI
+fills the frame on the close ones. The pan is clamped so the window always covers the
+content area, which means a settled `cam(1.0, …)` lands back in exactly the classic
+framing — that's why openings and endings sit at z=1.
 
 ## Cinematography principles (the parts that took iteration to get right)
 
@@ -120,6 +129,9 @@ working instance (a canvas block-reorder demo: 5 layout tiles + a center-drop fi
 - **The cursor is drawn by the compositor, not the page.** Capture records `mx,my` per
   frame; the compositor composites a vector arrow at final resolution, so it stays crisp
   at any zoom (a DOM-injected cursor blurs when the camera zooms — don't reintroduce one).
+- **A keycap hint is a claim, not proof.** `press()` records the combo you sent; if focus
+  was in the wrong element the app ignores it and the video shows keycaps with nothing
+  happening. Check the frames right after the press for the effect you expected.
 - **still() vs hold() is a correctness call**: a `still()` during an app animation freezes
   it in the video. When unsure whether something is still animating, use `hold()`.
 - **ffprobe the output** — the compositor prints the exact check line; confirm
@@ -153,6 +165,12 @@ working instance (a canvas block-reorder demo: 5 layout tiles + a center-drop fi
 - `cam(z, (fx,fy))` — set the camera **target** (zoom + focus in page px); compositor eases to it.
 - `move_to(x, y, n)` — ease the mouse to (x,y) over n captured frames (the main "action" verb).
   `jump(x,y)` — teleport without capturing.
+- `click(x, y)` — click + record an indigo pulse ring at that point.
+- `press("Meta+Enter")` — press a shortcut and show it as **keycaps at the bottom of the
+  frame** (`⌘` + `Enter`) for ~1s. Modifier names are mapped to glyphs; pass a second arg
+  to override the label. Use it for anything a viewer can't otherwise see (shortcuts,
+  paste, undo) — plain typing needs no hint.
+- `type_text(s, per_char=3)` — type one character every few frames, so it reads as live typing.
 - `center(sel)` / `box(sel)` — element center / bounding box (Playwright selector).
 - `fit_zoom([box,...], margin_px, lo, hi)` → `(zoom, focus)` framing those elements (cap `hi`
   to avoid over-zoom).
@@ -169,5 +187,8 @@ working instance (a canvas block-reorder demo: 5 layout tiles + a center-drop fi
 - `ZOOM_EMA` / `PAN_EMA` — camera easing (0.11 / 0.13: reaches per-shot framing within a short
   hold; lower = gentler but laggier).
 - `END_EXTRA` — tail frames so the closing zoom-out settles + lingers.
+- `KEY_H` / `KEY_INSET` / `KEY_N` — keycap size, gap from the bottom edge, how long a
+  shortcut hint stays up. `KEY_FONTS` — font candidates (needs ⌘/⇧/⌥ glyphs; macOS SF NS
+  first, DejaVu Sans as the Linux fallback).
 - `CRF` / `PRESET` — libx264 quality/speed (18 / fast). `WORKERS` — render pool size.
 - `CURSOR_CSS_H` — drawn cursor size in page px (26 matches the old baked cursor).

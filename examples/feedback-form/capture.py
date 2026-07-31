@@ -15,7 +15,9 @@ for f in os.listdir(FR):
     if f.startswith("f") and f.endswith(".jpg"): os.remove(os.path.join(FR, f))
 
 meta = {"dsf": DSF, "fps": FPS, "clip": {"x": 0, "y": 0, "width": VIEWPORT[0], "height": VIEWPORT[1]},
-        "frames": [], "clicks": []}
+        "frames": [], "clicks": [], "keys": []}
+
+GLYPH = {"Meta": "⌘", "Control": "⌃", "Alt": "⌥", "Shift": "⇧"}
 
 with sync_playwright() as p:
     browser = p.chromium.launch(args=[f"--force-device-scale-factor={DSF}"])
@@ -60,6 +62,10 @@ with sync_playwright() as p:
         for ch in text:
             pg.keyboard.type(ch)
             hold(per_char)
+    def press(combo, label=None):
+        pg.keyboard.press(combo)
+        meta["keys"].append({"i": len(meta["frames"]),
+                             "text": label or "+".join(GLYPH.get(k, k) for k in combo.split("+"))})
 
     # ---- STORYLINE ----
     Z, FOCUS = fit_zoom([box(".card"), box(".stats")], margin_px=150, hi=1.45)
@@ -76,8 +82,7 @@ with sync_playwright() as p:
     type_text("Loving the new editor!", per_char=3)
     still(12)
 
-    x, y = center("#send"); move_to(x, y, 26); still(6)
-    click(x, y); hold(46)                                    # spinner -> success swap
+    press("Meta+Enter"); hold(46)                            # keycaps show, spinner -> success
     hold(34)                                                 # checkmark draws, count pops
     still(26)                                                # linger on the payoff
 

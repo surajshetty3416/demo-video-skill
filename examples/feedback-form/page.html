@@ -39,6 +39,12 @@
     cursor: pointer; transition: background .18s ease; position: relative;
   }
   button:hover { background: #1e293b; }
+  .hint { margin-top: 12px; text-align: center; color: #94a3b8; font-size: 13px; }
+  kbd {
+    font: inherit; font-size: 12px; color: #475569; background: #f8fafc;
+    border: 1px solid #e2e8f0; border-bottom-width: 2px; border-radius: 6px;
+    padding: 2px 6px; margin: 0 2px;
+  }
   .stats { display: flex; flex-direction: column; gap: 14px; width: 250px; }
   .stat {
     background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px 22px;
@@ -83,6 +89,7 @@
       </div>
       <textarea id="note" placeholder="Anything else? (optional)"></textarea>
       <button id="send"><span id="send-label">Send feedback</span><span class="spinner" id="spin"></span></button>
+      <div class="hint">Press <kbd>⌘</kbd><kbd>Enter</kbd> to send</div>
     </div>
     <div class="success" id="success">
       <svg viewBox="0 0 76 76">
@@ -101,7 +108,7 @@
 <script>
   document.querySelectorAll('.chip').forEach(c =>
     c.addEventListener('click', () => c.classList.toggle('on')));
-  document.getElementById('send').addEventListener('click', () => {
+  function submit() {
     document.getElementById('send-label').style.display = 'none';
     document.getElementById('spin').style.display = 'block';
     setTimeout(() => {
@@ -112,6 +119,10 @@
       c.textContent = '1,285'; c.classList.add('pop');
       setTimeout(() => c.classList.remove('pop'), 450);
     }, 650);
+  }
+  document.getElementById('send').addEventListener('click', submit);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit();
   });
 </script>
 </body>

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Generic ScreenStudio-style compositor: clean captured frames + a camera
-timeline -> polished demo.mp4 (gradient background, rounded panel, soft shadow,
-vector cursor, smooth zoom/pan, extended ending). Pure Pillow + ffmpeg.
+timeline -> polished demo.mp4 (gradient background, rounded window with a soft
+shadow that scales with the zoom, vector cursor, click pulses, shortcut keycaps,
+smooth zoom/pan, extended ending). Pure Pillow + ffmpeg.
 
 Renders with a worker pool and streams frames straight into one ffmpeg process:
 no intermediate frames_out/ PNGs and no second encode pass. Identical still
@@ -12,8 +13,10 @@ Output (in WORKDIR):  demo.mp4   (+ ffmpeg.log)
 
 meta.json = {"dsf":2, "fps":60, "clip":{"x","y","width","height"},
              "frames":[{"cx","cy","z", "mx"?,"my"?, "repeat"?}, ...],
-             "clicks":[{"i","x","y"}, ...]?}   # frame index + position of each click;
+             "clicks":[{"i","x","y"}, ...]?,   # frame index + position of each click;
                                                # an indigo pulse ring animates there
+             "keys":[{"i","text"}, ...]?}      # frame index + shortcut ("⌘+Enter"):
+                                               # keycaps fade in at the bottom of the frame
   cx,cy = camera FOCUS point in page(CSS) px; z = zoom (1.0 = whole capture).
   mx,my = mouse position (CSS px): the cursor is drawn HERE, crisp at any zoom.
           Absent (old captures with the DOM cursor baked in) -> no overlay drawn.
@@ -25,8 +28,9 @@ Usage:  python compositor.py [WORKDIR]        (WORKDIR defaults to $VIDEO_DIR or
                                                uses ALL pixels of a DSF=2 capture)
 """
 import io, json, os, subprocess, sys
+from math import ceil, floor
 from multiprocessing import Pool
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 # ---- knobs -----------------------------------------------------------------
 PANEL_SCALE = int(os.environ.get("PANEL_SCALE", "2" if os.environ.get("HD") == "1" else "1"))
@@ -38,9 +42,16 @@ PAN_EMA   = 0.13          # too small and multi-shot moves never reach their tar
 END_EXTRA = 95            # extra tail frames rendered on the LAST frame so a closing
                           # zoom-out fully settles + lingers (no abrupt cut)
 GRAD = [(0.0,(238,242,255)), (0.5,(237,233,254)), (1.0,(250,232,255))]  # diagonal stops
+SHADOW_SS = 8             # the window shadow is soft: blur it at 1/8 scale
 CURSOR_CSS_H = 34         # cursor height in page CSS px (enlarged for legibility)
 PULSE_N = 18              # frames a click pulse ring lives (~0.3s)
 PULSE_COLOR = (99,102,241)
+KEY_H = 46                # keycap height in output px (scaled by PANEL_SCALE)
+KEY_INSET = 34            # gap between the keycap row and the bottom of the frame
+KEY_N = 58                # frames a shortcut hint stays on screen (~1s)
+KEY_FONTS = ["/System/Library/Fonts/SFNSRounded.ttf", "/System/Library/Fonts/SFNS.ttf",
+             "/System/Library/Fonts/Helvetica.ttc", "/Library/Fonts/Arial Unicode.ttf",
+             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
 CRF, PRESET = 18, "fast"  # libx264 quality/speed
 WORKERS = max(2, (os.cpu_count() or 8) - 2)
 # ---------------------------------------------------------------------------
@@ -67,8 +78,8 @@ def grad(t):
         if t <= t1: return lerp(c0,c1,(t-t0)/(t1-t0))
     return GRAD[-1][1]
 
-# background (gradient + central lift + baked panel shadow), built small and
-# upscaled — everything here is soft, so 1/8 scale is visually identical
+# background (gradient + central lift), built small and upscaled — everything
+# here is soft, so 1/8 scale is visually identical
 def build_bg(ss=8):
     w, h = BG_W//ss, BG_H//ss
     bg = Image.new("RGB",(w,h)); px = bg.load(); diag = w+h
@@ -78,17 +89,21 @@ def build_bg(ss=8):
     ImageDraw.Draw(vig).ellipse([-w*0.25,-h*0.25,w*1.25,h*1.25], fill=40)
     bg = Image.composite(Image.new("RGB",(w,h),(255,255,255)), bg,
                          vig.filter(ImageFilter.GaussianBlur(120//ss)))
-    sh = Image.new("L",(w,h),0)
-    off = 10*PANEL_SCALE//ss
-    ImageDraw.Draw(sh).rounded_rectangle([MARGIN//ss, MARGIN//ss+off,
-        (MARGIN+PANEL_W)//ss, (MARGIN+PANEL_H)//ss+off], radius=max(2,RAD//ss), fill=120)
-    bg.paste(Image.new("RGB",(w,h),(15,23,42)), (0,0),
-             sh.filter(ImageFilter.GaussianBlur(34*PANEL_SCALE//ss)))
     return bg.resize((BG_W,BG_H), Image.BILINEAR)
 
 bg_base = build_bg()
-mask = Image.new("L",(PANEL_W,PANEL_H),0)
-ImageDraw.Draw(mask).rounded_rectangle([0,0,PANEL_W,PANEL_H], radius=RAD, fill=255)
+DARK = Image.new("RGB",(BG_W,BG_H),(15,23,42))
+
+# the window's drop shadow follows it as it scales/pans. Drawn at full res, then
+# blurred at 1/8 scale: the downscale keeps the sub-pixel position, so the shadow
+# glides with the window instead of stepping in 8px jumps.
+def shadow(ox, oy, pw, ph, z):
+    off = 10*PANEL_SCALE*z
+    m = Image.new("L",(BG_W,BG_H),0)
+    ImageDraw.Draw(m).rounded_rectangle([ox, oy+off, ox+pw, oy+ph+off],
+                                        radius=max(1,round(RAD*z)), fill=120)
+    m = m.resize((BG_W//SHADOW_SS, BG_H//SHADOW_SS), Image.BILINEAR)
+    return m.filter(ImageFilter.GaussianBlur(34*PANEL_SCALE/SHADOW_SS)).resize((BG_W,BG_H), Image.BILINEAR)
 
 # vector cursor sprite (macOS-style arrow: black fill, white outline, soft shadow),
 # rendered at the exact final size per frame — crisp at any zoom. Cached per size.
@@ -124,30 +139,96 @@ def draw_pulse(img, x, y, age, size):
     ring = ring.resize((D//aa,D//aa), Image.LANCZOS)
     img.alpha_composite(ring, (round(x-ring.width/2), round(y-ring.height/2)))
 
+# keyboard-shortcut HUD: a row of keycaps at the bottom of the frame ("⌘+Enter" ->
+# two caps), rendered 3x and downscaled so the corners and glyphs stay smooth.
+_keycaps, _fonts = {}, {}
+def key_font(px):
+    f = _fonts.get(px)
+    if f is None:
+        for path in KEY_FONTS:
+            try: f = ImageFont.truetype(path, px)
+            except OSError: continue
+            try: f.set_variation_by_name("Semibold")
+            except Exception: pass
+            break
+        f = _fonts[px] = f or ImageFont.load_default(px)
+    return f
+
+def key_sprite(text):
+    sp = _keycaps.get(text)
+    if sp: return sp
+    aa = 3; h = round(KEY_H*PANEL_SCALE)*aa
+    font = key_font(round(h*0.42))
+    caps = [c.strip() for c in text.split("+") if c.strip()]
+    pad, gap, rad, blur = round(h*0.34), round(h*0.18), round(h*0.27), round(h*0.13)
+    boxes = [font.getbbox(c) for c in caps]
+    ws = [max(h, b[2]-b[0]+2*pad) for b in boxes]
+    m = 3*blur
+    img = Image.new("RGBA", (sum(ws)+gap*(len(caps)-1)+2*m, h+2*m), (0,0,0,0))
+    d = ImageDraw.Draw(img); x = m
+    for c, b, w in zip(caps, boxes, ws):
+        d.rounded_rectangle([x, m, x+w, m+h], radius=rad, fill=(15,23,42,240))
+        d.text((x+w/2-(b[0]+b[2])/2, m+h/2-(b[1]+b[3])/2), c, font=font, fill=(255,255,255,255))
+        x += w+gap
+    sh = Image.new("RGBA", img.size, (0,0,0,0))
+    sh.paste((15,23,42,150), (0, round(blur*0.8)), img.getchannel("A").filter(ImageFilter.GaussianBlur(blur)))
+    img = Image.alpha_composite(sh, img)
+    sp = _keycaps[text] = img.resize((img.width//aa, img.height//aa), Image.LANCZOS)
+    return sp
+
+def draw_keys(img, keys):
+    text, age = keys[-1]                     # newest hint wins if two overlap
+    a = min(1.0, age/5) * min(1.0, (KEY_N-age)/12)
+    if a <= 0: return
+    sp = key_sprite(text)
+    if a < 1: sp = sp.copy(); sp.putalpha(sp.getchannel("A").point(lambda v: round(v*a)))
+    rise = round((1-min(1.0, age/9))*12*PANEL_SCALE)   # eases up into place
+    img.paste(sp, ((BG_W-sp.width)//2, BG_H-KEY_INSET*PANEL_SCALE-sp.height+rise), sp)
+
 def clamp(v,a,b): return a if v<a else b if v>b else v
 def focus_px(fr): return (fr["cx"]-clip["x"])*dsf, (fr["cy"]-clip["y"])*dsf
 
+def place(want, span, bound):
+    """Window origin on one axis: follow the focus, but never pull an edge inside the
+    content area — so a settled z=1 lands back in exactly the classic framing."""
+    lo, hi = sorted((MARGIN, bound-MARGIN-span))
+    return clamp(want, lo, hi)
+
 _cache = {}
 def render(job):
-    idx, zc, fx, fy, mx, my, pulses = job
+    idx, zc, fx, fy, mx, my, pulses, keys = job
     src = _cache.get(idx)
     if src is None:
         _cache.clear(); src = _cache[idx] = Image.open(srcpath(idx)).convert("RGB")
-    cw, ch = SW/zc, SH/zc
-    left = clamp(fx-cw/2, 0, SW-cw); top = clamp(fy-ch/2, 0, SH-ch)
-    crop = src.crop((round(left),round(top),round(left+cw),round(top+ch))).resize((PANEL_W,PANEL_H), Image.LANCZOS)
+    # the whole window scales with the zoom (frame, corners and shadow included) and
+    # pans so the focus point sits at the centre; it bleeds off-frame when zoomed in.
+    s = PANEL_W*zc/SW                                  # source px -> output px
+    pw, ph = PANEL_W*zc, PANEL_H*zc
+    ox, oy = place(BG_W/2-fx*s, pw, BG_W), place(BG_H/2-fy*s, ph, BG_H)
+    x0, y0 = max(0, ceil(ox)), max(0, ceil(oy))        # visible slice of the window
+    x1, y1 = min(BG_W, floor(ox+pw)), min(BG_H, floor(oy+ph))
+    view = src.resize((x1-x0, y1-y0), Image.LANCZOS,
+                      box=((x0-ox)/s, (y0-oy)/s, min(SW,(x1-ox)/s), min(SH,(y1-oy)/s)))
     if mx is not None or pulses:
-        scale = PANEL_W/cw
-        size = max(8, round(CURSOR_CSS_H*dsf*scale))
-        crop = crop.convert("RGBA")
+        size = max(8, round(CURSOR_CSS_H*dsf*s))
+        view = view.convert("RGBA")
         for (cx, cy, age) in pulses:
-            draw_pulse(crop, ((cx-clip["x"])*dsf-left)*scale, ((cy-clip["y"])*dsf-top)*scale, age, size)
+            draw_pulse(view, ox+(cx-clip["x"])*dsf*s-x0, oy+(cy-clip["y"])*dsf*s-y0, age, size)
         if mx is not None:
             sp, pad = cursor_sprite(size)
-            px = ((mx-clip["x"])*dsf-left)*scale; py = ((my-clip["y"])*dsf-top)*scale
-            crop.alpha_composite(sp, (round(px-TIP[0]/24*size)-pad, round(py-TIP[1]/24*size)-pad))
-        crop = crop.convert("RGB")
-    out = bg_base.copy(); out.paste(crop, (MARGIN,MARGIN), mask)
+            px = ox+(mx-clip["x"])*dsf*s-x0; py = oy+(my-clip["y"])*dsf*s-y0
+            view.alpha_composite(sp, (round(px-TIP[0]/24*size)-pad, round(py-TIP[1]/24*size)-pad))
+        view = view.convert("RGB")
+    if (x1-x0, y1-y0) == (BG_W, BG_H):                 # window fills the frame
+        out = view
+    else:
+        out = bg_base.copy()
+        out.paste(DARK, (0,0), shadow(ox, oy, pw, ph, zc))
+        m = Image.new("L",(x1-x0, y1-y0),0)
+        ImageDraw.Draw(m).rounded_rectangle([ox-x0, oy-y0, ox+pw-x0, oy+ph-y0],
+                                            radius=max(1,round(RAD*zc)), fill=255)
+        out.paste(view, (x0,y0), m)
+    if keys: draw_keys(out, keys)
     # near-lossless handoff to ffmpeg (4:4:4 q96); the x264 pass sets final quality
     b = io.BytesIO(); out.save(b, "JPEG", quality=96, subsampling=0)
     return b.getvalue()
@@ -159,24 +240,28 @@ def main():
         expanded += [(i, fr)] * fr.get("repeat", 1)
     expanded += [(len(frames)-1, frames[-1])] * END_EXTRA
 
-    by_entry = {}
+    by_entry, keys_by_entry = {}, {}
     for c in meta.get("clicks", []):
         by_entry.setdefault(c["i"], []).append((c["x"], c["y"]))
+    for k in meta.get("keys", []):
+        keys_by_entry.setdefault(k["i"], []).append(k["text"])
 
     # precompute the eased camera path; settled frames dedup to one render
     zc = frames[0]["z"]; fx, fy = focus_px(frames[0])
-    plan, jobs, prev, active, seen = [], [], None, [], set()
+    plan, jobs, prev, active, shown, seen = [], [], None, [], [], set()
     for n, (idx, fr) in enumerate(expanded):
         if idx not in seen:
             seen.add(idx)
             active += [(x, y, n) for (x, y) in by_entry.get(idx, [])]
+            shown += [(t, n) for t in keys_by_entry.get(idx, [])]
         pulses = tuple((x, y, n-s) for (x, y, s) in active if n-s < PULSE_N)
+        keys = tuple((t, n-s) for (t, s) in shown if n-s < KEY_N)
         zc += (fr["z"]-zc)*ZOOM_EMA
         tfx, tfy = focus_px(fr); fx += (tfx-fx)*PAN_EMA; fy += (tfy-fy)*PAN_EMA
         mx, my = fr.get("mx"), fr.get("my")
-        key = (idx, round(zc,4), round(fx,2), round(fy,2), mx, my, pulses)
+        key = (idx, round(zc,4), round(fx,2), round(fy,2), mx, my, pulses, keys)
         if key == prev: plan.append(False)
-        else: plan.append(True); jobs.append((idx, zc, fx, fy, mx, my, pulses)); prev = key
+        else: plan.append(True); jobs.append((idx, zc, fx, fy, mx, my, pulses, keys)); prev = key
 
     out = os.path.join(WORKDIR, "demo.mp4")
     log = open(os.path.join(WORKDIR, "ffmpeg.log"), "w")

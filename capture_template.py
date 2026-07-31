@@ -27,7 +27,11 @@ FR = os.path.join(WORKDIR, "frames"); os.makedirs(FR, exist_ok=True)
 for f in os.listdir(FR):
     if f.startswith("f") and f.endswith(".jpg"): os.remove(os.path.join(FR, f))
 
-meta = {"dsf": DSF, "fps": FPS, "clip": {"x":0,"y":0,"width":VIEWPORT[0],"height":VIEWPORT[1]}, "frames": []}
+meta = {"dsf": DSF, "fps": FPS, "clip": {"x":0,"y":0,"width":VIEWPORT[0],"height":VIEWPORT[1]},
+        "frames": [], "clicks": [], "keys": []}
+
+GLYPH = {"Meta":"⌘", "Control":"⌃", "Alt":"⌥", "Shift":"⇧", "Escape":"Esc",
+         "ArrowUp":"↑", "ArrowDown":"↓", "ArrowLeft":"←", "ArrowRight":"→"}
 
 with sync_playwright() as p:
     browser = p.chromium.launch(args=[f"--force-device-scale-factor={DSF}"])
@@ -62,6 +66,16 @@ with sync_playwright() as p:
             e=ease(i/n); mx,my=x0+(x-x0)*e, y0+(y-y0)*e
             pg.mouse.move(mx,my); mouse["x"],mouse["y"]=mx,my; cap()
     def jump(x, y): pg.mouse.move(x,y); mouse["x"],mouse["y"]=x,y
+    def click(x, y):                                          # click + a pulse ring in the video
+        pg.mouse.click(x,y)
+        meta["clicks"].append({"i":len(meta["frames"]),"x":round(x,1),"y":round(y,1)})
+    def press(combo, label=None):                             # shortcut + keycaps at the bottom
+        pg.keyboard.press(combo)                              # ("Meta+Enter" -> ⌘ + Enter)
+        meta["keys"].append({"i":len(meta["frames"]),
+                             "text": label or "+".join(GLYPH.get(k,k) for k in combo.split("+"))})
+    def type_text(text, per_char=3):                          # per-frame typing (reads as live typing)
+        for ch in text:
+            pg.keyboard.type(ch); hold(per_char)
     def box(sel): return pg.locator(sel).first.bounding_box()
     def center(sel): b=box(sel); return b["x"]+b["width"]/2, b["y"]+b["height"]/2
     def fit_zoom(boxes, margin_px=110, lo=1.15, hi=1.6):     # steady zoom that frames given elements
@@ -85,7 +99,11 @@ with sync_playwright() as p:
     cam(Z, FOCUS); still(26)                    # single zoom-in, then hold steady
 
     # --- example beat: move to something and click ---
-    # x,y = center("text=Some Button"); move_to(x,y,34); still(6); pg.mouse.click(x,y); hold(24)
+    # x,y = center("text=Some Button"); move_to(x,y,34); still(6); click(x,y); hold(24)
+
+    # --- example beat: type, then fire a shortcut (keycaps show at the bottom) ---
+    # x,y = center("#field"); move_to(x,y,26); click(x,y); hold(10)
+    # type_text("hello there"); still(10); press("Meta+Enter"); hold(50)
 
     # --- example beat: drag-and-drop (read destination LIVE after pickup) ---
     # sx,sy = center("#item"); move_to(sx,sy,30); pg.mouse.down(); move_to(sx+10,sy,10)
