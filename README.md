@@ -12,14 +12,22 @@ A fully scripted storyline: chip toggles with click pulse rings, per-frame typin
 
 
 
-https://github.com/user-attachments/assets/aa91b948-5517-4d06-bbe3-300b72cf560d
+
+
+https://github.com/user-attachments/assets/c242145c-ecb9-4edc-9891-8852d5e1a8fa
+
+
 
 
 
 The multi-case "tile" pattern from `example-multicase.py`, showcasing five drag-reorder behaviors of [Frappe Builder](https://github.com/frappe/builder) in one take:
 
 
-https://github.com/user-attachments/assets/ffce7b66-ae76-44ea-afe3-94649020c6cc
+
+
+https://github.com/user-attachments/assets/d1ae9ce6-27a1-4517-80f8-65e37682e152
+
+
 
 
 
