@@ -1214,6 +1214,22 @@ export function buildContextMenu(ev) {
         { label: "Reset to ×1", onClick: () => setCamZoomStop(1) },
       ],
     });
+    const spanSpeed = (mult) => () => applyEdit(() => {
+      m.speed = (m.speed || []).filter((sp) => sp.to <= b.i0 || sp.from > b.i1);
+      if (mult !== 1) {
+        m.speed.push({ from: b.i0, to: b.i1 + 1, mult });
+        select({ type: "speed", idx: m.speed.length - 1 });
+      }
+      metaEdited();
+    });
+    items.push({
+      label: "Set speed",
+      submenu: [
+        ...[2, 4, 8].map((mult) => ({ label: `${mult}× faster`, onClick: spanSpeed(mult) })),
+        { label: "0.5× (slow motion)", onClick: spanSpeed(0.5) },
+        { label: "Normal 1×", onClick: spanSpeed(1) },
+      ],
+    });
     items.push({
       label: "Split at playhead",
       disabled: !(phEntry > b.i0 && phEntry <= b.i1),
