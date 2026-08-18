@@ -54,6 +54,17 @@ Then ask Claude Code to "make a demo video of ..." and it picks the skill up aut
 | `compositor.py` | Multiprocess Pillow renderer, streams frames into one ffmpeg process |
 | `example-multicase.py` | Complete working example of the multi-case "tile" pattern |
 | `examples/feedback-form/` | Self-contained runnable demo (fixture page + capture script), no app server needed |
+| `editor/` | Local web editor for interactive fine-tuning: timeline, camera blocks, holds, speed regions, re-render |
+
+## Interactive editor
+
+`python3 editor/server.py <workdir>` opens a ScreenStudio-style web editor on a capture (stdlib http server + a prebuilt Vue UI, so no Node needed at run time): a live preview that replicates the compositor exactly, a scrubbable timeline with camera blocks, stretchable holds, speed regions and event chips, preset-first inspector panels, and one-click re-render + concat across segments. Edits are saved to `meta.edited.json` next to the capture; the original `meta.json` is never touched.
+
+Add `--detach` to run the server in its own session: it prints the URL + pid and logs to `<workdir>/editor.log`. That keeps it alive when launched from an agent shell, where plain background tasks get reaped when the session's task manager stops them.
+
+The editor working over a template-collage capture — scrubbing, retargeting a camera block, swapping the background, tightening padding, speeding the cut up 5×, then rendering:
+
+<!-- drag editor-demo.mp4 into the GitHub editor here to embed it (user-attachments URL) -->
 
 ## Using it without Claude Code
 

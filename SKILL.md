@@ -192,3 +192,54 @@ working instance (a canvas block-reorder demo: 5 layout tiles + a center-drop fi
   first, DejaVu Sans as the Linux fallback).
 - `CRF` / `PRESET` — libx264 quality/speed (18 / fast). `WORKERS` — render pool size.
 - `CURSOR_CSS_H` — drawn cursor size in page px (26 matches the old baked cursor).
+
+## Editor (interactive fine-tuning)
+
+`python3 editor/server.py --detach <workdir>` starts a local web editor (stdlib
+http.server on a free port), prints the URL + pid, and returns; the server runs in its
+own session with its output in `<workdir>/editor.log`, so it outlives the agent shell
+(a plain foreground or `run_in_background` launch gets reaped by the harness's task
+manager). Stop it later with `kill <pid>`. It serves the prebuilt Vue app from
+`editor/ui/dist`, so production launch needs no node. To hack on the UI: `cd editor/ui && yarn && yarn dev`
+with `EDITOR_API=http://127.0.0.1:<server port>` (vite proxies `/api`), then `yarn build`
+to refresh the dist the server ships. The chrome is Vue 3 + frappe-ui, monochrome and
+light by default with a top-bar light/dark toggle (persisted in localStorage); it styles
+everything with the frappe-ui semantic tokens (surface/ink/outline), and the canvas
+engines resolve their chrome colors from those CSS vars at draw time so both themes
+work. The preview renderer and virtualized timeline stay canvas engines in
+`editor/ui/src/editor/engine.js`; only the preview's video content (gradient, panel,
+cursor) is hardcoded, since it must match the rendered mp4.
+
+`<workdir>` is a segment dir (frames/ + meta.json) or a dir of segment dirs.
+Screen-Studio-style UI: segment rail (thumbnail + name + duration, drag-to-reorder =
+concat order), live preview canvas that replicates the compositor exactly (gradient,
+rounded window + shadow, EMA camera, cursor, pulses, keycaps), and one integrated
+timeline: a transport cluster (play/pause + current/total time) and Camera / Holds /
+Events track names in a left gutter, then a single ruler + playhead shared by all
+tracks. The ruler ticks in playback seconds (so ticks compress through sped-up
+sections), click/drag on it scrubs, and all durations shown anywhere are seconds; the
+canonical length everywhere is the body without END_EXTRA, whose hold tail draws as a
+hatched extension past the end marker. Tracks: camera blocks as chips with the zoom
+label (click to select, then click the preview to set focus / scroll to zoom, drag chip
+edges to move transitions), stretchable hold pills (drag the right edge to retime),
+non-destructive speed regions as hatched overlays (drag across live frames, stored as
+`speed:[{from,to,mult}]`), draggable click dots / keycap chips, and trim handles.
+Right-click anything on the timeline for a context menu (zoom stops, split/merge camera
+blocks via a `cut` flag on frames, hold presets in seconds, speed up a section, event
+add/edit/delete, trim/jump). Every edit goes through per-segment undo/redo (⌘Z / ⇧⌘Z,
+drags and slider scrubs coalesce into one entry). The inspector is preset-first:
+background swatches, corner/shadow/camera-feel/ending-hold/cursor/keycap segments, an
+overall-speed slider (0.5x-2x, saved as `pace` in the edited meta and composed with
+speed regions at resolve time), and quality/resolution for export; a selected camera
+block gets Wide/Slight/Medium/Close zoom stops, and other selections edit in seconds.
+Every raw knob (exact hexes, px values, EMAs, CRF, numeric z/cx/cy, trim entries) lives
+in the collapsed Advanced accordion, two-way synced: presets write the raw values,
+hand-edited raw values flip the matching preset to a "Custom" chip.
+
+Save writes `meta.edited.json` + `knobs.json` into the segment dir; the original
+`meta.json` is never touched. Render runs this skill's `compositor.py` per segment with
+`META_FILE` (a baked `meta.render.json`: trim + pace + speed resolved via `repeat`
+counts, event indices remapped) and `KNOBS_JSON` (constant overrides); "Render all + concat" then
+ffmpeg-concats (`-c copy`) in rail order to `<workdir>/edited-full.mp4`. Without those
+env vars the compositor behaves exactly as before. Keep one panel scale across segments
+when concatenating.

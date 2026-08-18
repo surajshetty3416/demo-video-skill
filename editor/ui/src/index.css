@@ -1,0 +1,40 @@
+@import "frappe-ui/style.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  /* one radius for every canvas-drawn timeline chip; engine.js reads this */
+  --chip-radius: 4px;
+  --scrollbar-thumb: var(--surface-gray-4);
+  --scrollbar-thumb-hover: var(--surface-gray-5);
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  user-select: none;
+}
+
+input[type="number"] {
+  font-variant-numeric: tabular-nums;
+}
+
+* {
+  scrollbar-width: none;
+}
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}

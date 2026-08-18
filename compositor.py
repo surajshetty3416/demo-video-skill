@@ -43,6 +43,8 @@ END_EXTRA = 95            # extra tail frames rendered on the LAST frame so a cl
                           # zoom-out fully settles + lingers (no abrupt cut)
 GRAD = [(0.0,(238,242,255)), (0.5,(237,233,254)), (1.0,(250,232,255))]  # diagonal stops
 SHADOW_SS = 8             # the window shadow is soft: blur it at 1/8 scale
+SHADOW_ALPHA = 120        # shadow strength (0..255)
+SHADOW_BLUR = 34          # shadow blur radius (scaled by PANEL_SCALE)
 CURSOR_CSS_H = 34         # cursor height in page CSS px (enlarged for legibility)
 PULSE_N = 18              # frames a click pulse ring lives (~0.3s)
 PULSE_COLOR = (99,102,241)
@@ -54,12 +56,16 @@ KEY_FONTS = ["/System/Library/Fonts/SFNSRounded.ttf", "/System/Library/Fonts/SFN
              "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
 CRF, PRESET = 18, "fast"  # libx264 quality/speed
 WORKERS = max(2, (os.cpu_count() or 8) - 2)
+# KNOBS_JSON: path to a json whose keys override the constants above (editor/).
+if os.environ.get("KNOBS_JSON"):
+    globals().update(json.load(open(os.environ["KNOBS_JSON"])))
 # ---------------------------------------------------------------------------
 
 WORKDIR = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("VIDEO_DIR", os.getcwd())
 FR = os.path.join(WORKDIR, "frames")
 
-meta = json.load(open(os.path.join(WORKDIR, "meta.json")))
+# META_FILE: alternate meta json (editor renders meta.render.json; default unchanged)
+meta = json.load(open(os.environ.get("META_FILE") or os.path.join(WORKDIR, "meta.json")))
 clip, dsf, FPS = meta["clip"], meta["dsf"], meta.get("fps", 60)
 SW, SH = clip["width"]*dsf, clip["height"]*dsf
 
@@ -101,9 +107,9 @@ def shadow(ox, oy, pw, ph, z):
     off = 10*PANEL_SCALE*z
     m = Image.new("L",(BG_W,BG_H),0)
     ImageDraw.Draw(m).rounded_rectangle([ox, oy+off, ox+pw, oy+ph+off],
-                                        radius=max(1,round(RAD*z)), fill=120)
+                                        radius=max(1,round(RAD*z)), fill=SHADOW_ALPHA)
     m = m.resize((BG_W//SHADOW_SS, BG_H//SHADOW_SS), Image.BILINEAR)
-    return m.filter(ImageFilter.GaussianBlur(34*PANEL_SCALE/SHADOW_SS)).resize((BG_W,BG_H), Image.BILINEAR)
+    return m.filter(ImageFilter.GaussianBlur(SHADOW_BLUR*PANEL_SCALE/SHADOW_SS)).resize((BG_W,BG_H), Image.BILINEAR)
 
 # vector cursor sprite (macOS-style arrow: black fill, white outline, soft shadow),
 # rendered at the exact final size per frame — crisp at any zoom. Cached per size.
@@ -209,7 +215,7 @@ def render(job):
     x1, y1 = min(BG_W, floor(ox+pw)), min(BG_H, floor(oy+ph))
     view = src.resize((x1-x0, y1-y0), Image.LANCZOS,
                       box=((x0-ox)/s, (y0-oy)/s, min(SW,(x1-ox)/s), min(SH,(y1-oy)/s)))
-    if mx is not None or pulses:
+    if (mx is not None or pulses) and CURSOR_CSS_H > 0:
         size = max(8, round(CURSOR_CSS_H*dsf*s))
         view = view.convert("RGBA")
         for (cx, cy, age) in pulses:
