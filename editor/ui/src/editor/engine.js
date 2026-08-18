@@ -412,7 +412,7 @@ function drawPreview() {
     const age = pf - start;
     if (age < 0 || age >= k.PULSE_N) continue;
     const t = age / k.PULSE_N;
-    const r = size * (0.55 + 1.7 * (1 - (1 - t) ** 2)), a = (170 * (1 - t)) / 255;
+    const r = size * (0.42 + 1.15 * (1 - (1 - t) ** 2)), a = (170 * (1 - t)) / 255;
     if (a <= 0 || r < 2) continue;
     ctx.beginPath();
     ctx.arc((ox + (c.x - clip.x) * dsf * s) * K, (oy + (c.y - clip.y) * dsf * s) * K, r * K, 0, 7);

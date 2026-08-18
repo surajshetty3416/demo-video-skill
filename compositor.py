@@ -137,7 +137,7 @@ def cursor_sprite(size):
 
 def draw_pulse(img, x, y, age, size):
     t = age/PULSE_N
-    r = size*(0.55 + 1.7*(1-(1-t)**2)); a = round(170*(1-t))
+    r = size*(0.42 + 1.15*(1-(1-t)**2)); a = round(170*(1-t))
     if a <= 0 or r < 2: return
     aa = 4; R = round(r*aa); w = max(aa, round(size*0.1*aa*(1-0.4*t))); D = 2*R+2*w
     ring = Image.new("RGBA",(D,D),(0,0,0,0))
