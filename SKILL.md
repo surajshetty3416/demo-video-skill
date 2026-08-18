@@ -199,8 +199,9 @@ working instance (a canvas block-reorder demo: 5 layout tiles + a center-drop fi
 http.server on a free port), prints the URL + pid, and returns; the server runs in its
 own session with its output in `<workdir>/editor.log`, so it outlives the agent shell
 (a plain foreground or `run_in_background` launch gets reaped by the harness's task
-manager). Stop it later with `kill <pid>`. It serves the prebuilt Vue app from
-`editor/ui/dist`, so production launch needs no node. To hack on the UI: `cd editor/ui && yarn && yarn dev`
+manager). Stop it later with `kill <pid>`. It serves the Vue app from `editor/ui/dist`;
+the dist is not checked in, so after a fresh clone run `cd editor/ui && yarn && yarn build`
+once (the server errors with that hint if the dist is missing). To hack on the UI: `cd editor/ui && yarn dev`
 with `EDITOR_API=http://127.0.0.1:<server port>` (vite proxies `/api`), then `yarn build`
 to refresh the dist the server ships. The chrome is Vue 3 + frappe-ui, monochrome and
 light by default with a top-bar light/dark toggle (persisted in localStorage); it styles

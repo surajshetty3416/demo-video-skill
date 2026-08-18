@@ -1,3 +1,4 @@
 editor/ui/node_modules/
 editor/testdata/
 __pycache__/
+editor/ui/dist/
