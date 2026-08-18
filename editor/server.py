@@ -9,7 +9,7 @@ lets the browser save meta.edited.json + knobs.json per segment (the original
 meta.json is never touched), and runs the skill's compositor.py per segment
 (META_FILE/KNOBS_JSON env) followed by an ffmpeg concat into edited-full.mp4.
 """
-import json, os, subprocess, sys, threading, time
+import json, os, re, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 EDITOR_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -104,6 +104,7 @@ class RenderJob:
     def __init__(self):
         self.lock = threading.Lock()
         self.lines, self.status, self.error = [], "idle", None
+        self.segments, self.outputs = [], []
         self.thread = None
 
     def log(self, line):
@@ -113,15 +114,29 @@ class RenderJob:
     def snapshot(self, since):
         with self.lock:
             return {"status": self.status, "error": self.error,
-                    "cursor": len(self.lines), "lines": self.lines[since:]}
+                    "cursor": len(self.lines), "lines": self.lines[since:],
+                    "segments": [dict(s) for s in self.segments],
+                    "outputs": [dict(o) for o in self.outputs]}
 
     def start(self, segs, concat, workdir):
         with self.lock:
             if self.status == "running": return False
             self.lines, self.status, self.error = [], "running", None
+            self.segments = [{"name": n, "frames": 0, "total": 0, "state": "pending"}
+                             for n, _ in segs]
+            if concat and len(segs) >= 1:
+                self.segments.append({"name": "combine", "frames": 0, "total": 0, "state": "pending"})
+            self.outputs = []
         self.thread = threading.Thread(target=self.run, args=(segs, concat, workdir), daemon=True)
         self.thread.start()
         return True
+
+    def seg_slot(self, name):
+        return next(s for s in self.segments if s["name"] == name)
+
+    def add_output(self, label, url, fpath):
+        with self.lock:
+            self.outputs.append({"label": label, "url": url, "bytes": os.path.getsize(fpath)})
 
     def run(self, segs, concat, workdir):
         try:
@@ -130,14 +145,13 @@ class RenderJob:
             if concat and len(segs) >= 1:
                 self.concat(segs, workdir)
             with self.lock: self.status = "done"
-            self.log("== all done ==")
         except Exception as e:
             with self.lock:
                 self.status, self.error = "error", str(e)
             self.log(f"ERROR: {e}")
 
     def render_segment(self, name, path):
-        self.log(f"== rendering {name} ==")
+        slot = self.seg_slot(name)
         env = dict(os.environ)
         edited = os.path.join(path, "meta.edited.json")
         if os.path.exists(edited):
@@ -145,18 +159,33 @@ class RenderJob:
             rpath = os.path.join(path, "meta.render.json")
             json.dump(resolved, open(rpath, "w"))
             env["META_FILE"] = rpath
+            total = sum(f.get("repeat", 1) for f in resolved["frames"])
+        else:
+            meta = json.load(open(os.path.join(path, "meta.json")))
+            total = sum(f.get("repeat", 1) for f in meta["frames"])
+        with self.lock:
+            slot["state"], slot["total"] = "running", total
         knobs = os.path.join(path, "knobs.json")
         if os.path.exists(knobs):
             env["KNOBS_JSON"] = knobs
-        proc = subprocess.Popen([sys.executable, COMPOSITOR, path], env=env,
+        proc = subprocess.Popen([sys.executable, "-u", COMPOSITOR, path], env=env,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         for line in proc.stdout:
-            self.log(f"[{name}] {line.rstrip()}")
+            line = line.rstrip()
+            m = re.match(r"frame (\d+) / (\d+)", line)
+            if m:
+                with self.lock:
+                    slot["frames"], slot["total"] = int(m.group(1)), int(m.group(2))
+            self.log(f"[{name}] {line}")
         if proc.wait() != 0:
             raise RuntimeError(f"compositor failed for {name}")
+        with self.lock:
+            slot["state"], slot["frames"] = "done", slot["total"]
+        self.add_output(name, f"/output/{name}", os.path.join(path, "demo.mp4"))
 
     def concat(self, segs, workdir):
-        self.log("== concat ==")
+        slot = self.seg_slot("combine")
+        with self.lock: slot["state"] = "running"
         lst = os.path.join(workdir, "edited-concat.txt")
         with open(lst, "w") as f:
             for name, path in segs:
@@ -166,10 +195,11 @@ class RenderJob:
                                  "-c", "copy", out],
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         for line in proc.stdout:
-            self.log(f"[concat] {line.rstrip()}")
+            self.log(f"[combine] {line.rstrip()}")
         if proc.wait() != 0:
             raise RuntimeError("ffmpeg concat failed")
-        self.log(f"wrote {out}")
+        with self.lock: slot["state"] = "done"
+        self.add_output("Full video", "/output/__full__", out)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -195,6 +225,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
         try:
+            if path.startswith("/output/"): return self.serve_video(path.split("/")[2])
             if not path.startswith("/api/"): return self.static(path)
             if path == "/api/segments": return self.list_segments()
             if path == "/api/render/status": return self.render_status()
@@ -292,6 +323,32 @@ class Handler(BaseHTTPRequestHandler):
             for kv in self.path.split("?", 1)[1].split("&"):
                 if kv.startswith("since="): since = int(kv[6:] or 0)
         self.send(200, self.job.snapshot(since))
+
+    def serve_video(self, name):
+        if name == "__full__":
+            fpath = os.path.join(self.workdir, "edited-full.mp4")
+        else:
+            seg = self.segpath(name)
+            fpath = seg and os.path.join(seg, "demo.mp4")
+        if not fpath or not os.path.exists(fpath):
+            return self.send(404, {"error": "no rendered video"})
+        size = os.path.getsize(fpath)
+        start, end = 0, size - 1
+        rng = self.headers.get("Range")
+        if rng and rng.startswith("bytes="):
+            a, _, b = rng[6:].partition("-")
+            if a: start = int(a)
+            if b: end = min(int(b), size - 1)
+        length = end - start + 1
+        self.send_response(206 if rng else 200)
+        self.send_header("Content-Type", "video/mp4")
+        self.send_header("Accept-Ranges", "bytes")
+        if rng: self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.send_header("Content-Length", str(length))
+        self.end_headers()
+        with open(fpath, "rb") as f:
+            f.seek(start)
+            self.wfile.write(f.read(length))
 
 
 def spawn_detached(workdir):

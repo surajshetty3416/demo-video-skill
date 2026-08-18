@@ -70,7 +70,8 @@ export const ui = reactive({
   timeCur: "0:00.0", timeTotal: "0:00.0",
   dirty: false, saveLabel: "",
   canUndo: false, canRedo: false,
-  render: { status: "idle", title: "", lines: [], progress: null, open: false },
+  render: { status: "idle", lines: [], progress: null, open: false,
+            segments: [], outputs: [], error: null },
   ctxOptions: [],
   prompt: null,
 });
@@ -1394,11 +1395,18 @@ export async function startRender(segments, concat) {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ segments, concat }),
   });
-  if (!r.ok) { ui.render.status = "error"; ui.render.title = "Render already running"; return false; }
+  if (!r.ok) { ui.render.status = "error"; ui.render.error = "A render is already running"; return false; }
   renderCursor = 0;
-  Object.assign(ui.render, { open: true, status: "running", title: "Rendering…", lines: [], progress: null });
+  Object.assign(ui.render, { open: true, status: "running", lines: [], progress: 0,
+                             segments: [], outputs: [], error: null });
   pollRender();
   return true;
+}
+function renderPct(segs) {
+  if (!segs.length) return 0;
+  const per = segs.map((s) =>
+    s.state === "done" ? 1 : s.total ? Math.min(1, s.frames / s.total) : 0);
+  return Math.round((per.reduce((a, b) => a + b, 0) / segs.length) * 100);
 }
 async function pollRender() {
   const st = await (await fetch(`/api/render/status?since=${renderCursor}`)).json();
@@ -1406,16 +1414,15 @@ async function pollRender() {
   if (st.lines.length) {
     ui.render.lines.push(...st.lines);
     if (ui.render.lines.length > 200) ui.render.lines.splice(0, ui.render.lines.length - 200);
-    for (const line of st.lines) {
-      const mm = line.match(/frame (\d+) \/ (\d+)/);
-      if (mm) ui.render.progress = Math.round((+mm[1] / +mm[2]) * 100);
-    }
   }
-  if (st.status === "running") setTimeout(pollRender, 600);
+  ui.render.segments = st.segments || [];
+  ui.render.outputs = st.outputs || [];
+  ui.render.error = st.error;
+  ui.render.progress = renderPct(ui.render.segments);
+  if (st.status === "running") setTimeout(pollRender, 500);
   else {
     ui.render.status = st.status;
-    ui.render.progress = st.status === "done" ? 100 : ui.render.progress;
-    ui.render.title = st.status === "done" ? "Render complete" : `Render ${st.status}: ${st.error || ""}`;
+    if (st.status === "done") ui.render.progress = 100;
   }
 }
 

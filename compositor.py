@@ -284,7 +284,7 @@ def main():
         for n, fresh in enumerate(plan):
             if fresh: buf = next(it)
             ff.stdin.write(buf)
-            if n % 240 == 0: print("frame", n, "/", len(plan))
+            if n % 60 == 0: print("frame", n, "/", len(plan))
     ff.stdin.close()
     if ff.wait() != 0: sys.exit(f"ffmpeg failed — see {WORKDIR}/ffmpeg.log")
     print(f"done {len(plan)} frames ({len(jobs)} rendered), {BG_W}x{BG_H} -> {out}")
