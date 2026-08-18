@@ -96,14 +96,6 @@
       </InspectorSection>
 
       <InspectorSection title="Pacing">
-        <InspectorRow label="Speed">
-          <FormControl class="w-16 shrink-0" type="number" :modelValue="M.pace"
-            @update:modelValue="(v) => isFinite(parseFloat(v)) && engine.setPace(parseFloat(v))" />
-          <div class="min-w-0 flex-1">
-            <Slider v-model="paceModel" :min="0.5" :max="8" :step="0.1" size="sm"
-              @value-commit="engine.commitGesture()" />
-          </div>
-        </InspectorRow>
         <SimpleCtl v-for="c in byCard('pacing')" :key="c.id" :c="c" />
       </InspectorSection>
 
@@ -132,6 +124,10 @@
         <InspectorRow v-for="f in advFields" :key="f.key" :label="f.label">
           <FormControl class="w-full" type="number" :modelValue="K[f.key]"
             @update:modelValue="(v) => engine.setKnob(f.key, parseFloat(v), f.kind)" />
+        </InspectorRow>
+        <InspectorRow label="Speed ramp (s)">
+          <FormControl class="w-full" type="number" :modelValue="M.speedRamp" :step="0.1"
+            @update:modelValue="(v) => isFinite(parseFloat(v)) && engine.setSpeedRamp(parseFloat(v))" />
         </InspectorRow>
         <InspectorRow label="Trim in (entry)">
           <FormControl class="w-full" type="number" :modelValue="M.trim.in"
@@ -162,7 +158,7 @@
 
 <script setup>
 import { computed, defineComponent, h } from "vue";
-import { Button, FormControl, Slider, TabButtons } from "frappe-ui";
+import { Button, FormControl, TabButtons } from "frappe-ui";
 import IconTrash from "~icons/lucide/trash-2";
 import * as engine from "../editor/engine.js";
 import { ui, BG_PRESETS, SIMPLE, ZOOM_STOPS, rgbHex } from "../editor/engine.js";
@@ -191,7 +187,7 @@ const M = computed(() => {
     clicks: m?.clicks || [],
     keys: m?.keys || [],
     trim: m?.trim || { in: 0, out: 0 },
-    pace: m?.pace || 1,
+    speedRamp: m?.speedRamp ?? engine.RAMP_DEFAULT,
   };
 });
 const camBlock = computed(() => {
@@ -209,13 +205,6 @@ const holdSeconds = computed(
 const bgIdx = computed(() => {
   ui.rev;
   return engine.state.knobs ? engine.bgPresetIndex() : 0;
-});
-const paceModel = computed({
-  get: () => [M.value.pace],
-  set: ([v]) => {
-    engine.beginGesture();
-    engine.setPace(v);
-  },
 });
 const fmtZoom = (z) => `${z.toFixed(2)}×`;
 const zoomTabOpts = ZOOM_STOPS.map(([label], i) => ({ label, value: i }));

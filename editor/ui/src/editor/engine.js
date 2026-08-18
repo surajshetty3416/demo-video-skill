@@ -167,6 +167,33 @@ function validateSel() {
 }
 
 /* ---------- resolve (mirror of server.resolve_meta) ---------- */
+export const RAMP_DEFAULT = 0.6;
+
+// Mirror of server.smooth_mults: raised-cosine easing of speed changes in log
+// space, replicate-padded; the 1e-6 rounding collapses libm-vs-V8 ulp drift so
+// both sides resample identical numbers. Uniform input is returned untouched.
+export function smoothMults(mults, fps, ramp) {
+  const n = mults.length;
+  if (n === 0 || mults.every((v) => v === mults[0])) return mults;
+  const w = Math.floor(fps * Math.max(ramp, 0) + 0.5) | 1;
+  if (w <= 1) return mults;
+  const half = (w - 1) >> 1;
+  const ker = [];
+  for (let d = -half; d <= half; d++) ker.push(1 + Math.cos((Math.PI * d) / (half + 1)));
+  const ksum = ker.reduce((a, b) => a + b, 0);
+  const logs = mults.map((v) => Math.log(v));
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    let acc = 0;
+    for (let d = -half; d <= half; d++) {
+      const j = Math.min(Math.max(i + d, 0), n - 1);
+      acc += ker[d + half] * logs[j];
+    }
+    out.push(Math.floor(Math.exp(acc / ksum) * 1e6 + 0.5) / 1e6);
+  }
+  return out;
+}
+
 export function resolveMeta(m) {
   const n = m.frames.length;
   const trim = m.trim || {};
@@ -174,11 +201,12 @@ export function resolveMeta(m) {
   let reps = m.frames.map((f) => f.repeat ?? 1);
   for (let i = 0; i < n; i++) if (i < tin || i > tout) reps[i] = 0;
   const pace = m.pace > 0 ? m.pace : 1;
-  const mults = new Array(n).fill(pace);
+  let mults = new Array(n).fill(pace);
   for (const sp of m.speed || []) {
     if (!(sp.mult > 0)) continue;
     for (let i = Math.max(0, sp.from); i < Math.min(n, sp.to); i++) mults[i] *= sp.mult;
   }
+  mults = smoothMults(mults, m.fps || 60, m.speedRamp ?? RAMP_DEFAULT);
   let acc = 0;
   for (let i = 0; i < n; i++) {
     if (!reps[i]) continue;
@@ -724,18 +752,18 @@ function drawCameraRow(ctx, W, P) {
 
 function drawHoldsRow(ctx, W, P) {
   const m = state.meta, sel = ui.sel, fps = m.fps || 60;
+  const entryX = (e) =>
+    tlX(e >= m.frames.length ? state.eTotal : state.eStarts[clamp(e, 0, m.frames.length - 1)]);
+  // feather half-width mirrors smoothMults' kernel reach on each side of a boundary
+  const halfE = ((Math.floor(fps * Math.max(m.speedRamp ?? RAMP_DEFAULT, 0) + 0.5) | 1) - 1) >> 1;
   for (let si = 0; si < (m.speed || []).length; si++) {
     const sp = m.speed[si];
     if (sp.to <= 0 || sp.from >= m.frames.length) continue;
-    const x0 = tlX(state.eStarts[clamp(sp.from, 0, m.frames.length - 1)]);
-    const x1 = tlX(sp.to >= m.frames.length ? state.eTotal : state.eStarts[sp.to]);
+    const x0 = entryX(sp.from), x1 = entryX(sp.to);
     const selHere = sel && sel.type === "speed" && sel.idx === si;
-    chipRect(ctx, x0, TL.TIM[0] + 1, x1 - x0, TL.TIM[1] - 2);
-    ctx.fillStyle = withAlpha(P.strong, selHere ? 0.1 : 0.05);
-    ctx.fill();
-    ctx.fillStyle = hatchFor(ctx);
-    ctx.fill();
-    if (selHere) { ctx.strokeStyle = P.ink; ctx.lineWidth = 1.5; ctx.stroke(); }
+    const fwL = clamp(entryX(sp.from + halfE) - x0, 0, (x1 - x0) / 2);
+    const fwR = clamp(x1 - entryX(sp.to - halfE), 0, (x1 - x0) / 2);
+    drawSpeedRegion(ctx, P, x0, x1, fwL, fwR, selHere);
     if (x1 - x0 > 34) {
       ctx.font = tlFont(11, 500);
       const label = `${sp.mult}×`, w = ctx.measureText(label).width;
@@ -776,6 +804,51 @@ function drawHoldsRow(ctx, W, P) {
     ctx.strokeStyle = P.ink5; ctx.setLineDash([3, 3]);
     ctx.stroke();
     ctx.restore();
+  }
+}
+
+// Hatched speed overlay whose left/right edges fade over the ramp width, so
+// the chip itself suggests the eased transition instead of a hard cut.
+function drawSpeedRegion(ctx, P, x0, x1, fwL, fwR, selHere) {
+  const y = TL.TIM[0] + 1, h = TL.TIM[1] - 2, w = x1 - x0;
+  const tint = withAlpha(P.strong, selHere ? 0.1 : 0.05);
+  ctx.save();
+  chipRect(ctx, x0, y, w, h);
+  ctx.clip();
+  if (fwL < 1 && fwR < 1) {
+    ctx.fillStyle = tint;
+    ctx.fillRect(x0, y, w, h);
+    ctx.fillStyle = hatchFor(ctx);
+    ctx.fillRect(x0, y, w, h);
+  } else {
+    const grad = ctx.createLinearGradient(x0, 0, x1, 0);
+    grad.addColorStop(0, withAlpha(P.strong, 0));
+    grad.addColorStop(clamp(fwL / w, 0, 1), tint);
+    grad.addColorStop(clamp(1 - fwR / w, 0, 1), tint);
+    grad.addColorStop(1, withAlpha(P.strong, 0));
+    ctx.fillStyle = grad;
+    ctx.fillRect(x0, y, w, h);
+    ctx.fillStyle = hatchFor(ctx);
+    const step = 3;
+    for (let x = 0; x < fwL; x += step) {
+      const sw = Math.min(step, fwL - x);
+      ctx.globalAlpha = (x + sw / 2) / fwL;
+      ctx.fillRect(x0 + x, y, sw, h);
+    }
+    for (let x = 0; x < fwR; x += step) {
+      const sw = Math.min(step, fwR - x);
+      ctx.globalAlpha = (x + sw / 2) / fwR;
+      ctx.fillRect(x1 - x - sw, y, sw, h);
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillRect(x0 + fwL, y, Math.max(0, w - fwL - fwR), h);
+  }
+  ctx.restore();
+  if (selHere) {
+    chipRect(ctx, x0, y, w, h);
+    ctx.strokeStyle = P.ink;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
   }
 }
 
@@ -1081,9 +1154,9 @@ export function setGradStop(i, hex) {
   state.knobs.GRAD[i][1] = hexRgb(hex);
   knobsEdited(true);
 }
-export function setPace(v) {
-  if (!(v > 0)) return;
-  state.meta.pace = Math.round(v * 100) / 100;
+export function setSpeedRamp(v) {
+  if (!isFinite(v) || v < 0) return;
+  state.meta.speedRamp = Math.round(v * 100) / 100;
   metaEdited();
 }
 export function setCamValue(field, v) {
@@ -1355,7 +1428,7 @@ export async function loadSegment(name) {
     };
     meta.speed = meta.speed || [];
     meta.trim = meta.trim || { in: 0, out: meta.frames.length - 1 };
-    meta.pace = meta.pace || 1;
+    meta.speedRamp = meta.speedRamp ?? RAMP_DEFAULT;
     st = {
       meta,
       knobs: data.knobs ? knobsFromSaved(data.knobs) : { ...KNOB_DEFAULTS, GRAD: KNOB_DEFAULTS.GRAD.map(([t, c]) => [t, [...c]]) },

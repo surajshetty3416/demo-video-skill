@@ -9,7 +9,7 @@ lets the browser save meta.edited.json + knobs.json per segment (the original
 meta.json is never touched), and runs the skill's compositor.py per segment
 (META_FILE/KNOBS_JSON env) followed by an ffmpeg concat into edited-full.mp4.
 """
-import json, os, re, subprocess, sys, threading, time
+import json, math, os, re, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 EDITOR_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -52,6 +52,33 @@ def sanitize_knobs(k):
     return out
 
 
+# Speed transitions ease over this many seconds unless the meta overrides it.
+RAMP_DEFAULT = 0.6
+
+
+def smooth_mults(mults, fps, ramp):
+    """Ease speed changes: raised-cosine smoothing of per-entry multipliers in log
+    space, replicate-padded at the edges. Mirrored exactly in engine.js resolveMeta;
+    the 1e-6 rounding collapses libm-vs-V8 ulp drift so both sides resample the same
+    numbers. Uniform input is returned untouched (identity guarantee)."""
+    n = len(mults)
+    if n == 0 or all(v == mults[0] for v in mults): return mults
+    w = int(fps * max(ramp, 0) + 0.5) | 1
+    if w <= 1: return mults
+    half = (w - 1) // 2
+    ker = [1 + math.cos(math.pi * d / (half + 1)) for d in range(-half, half + 1)]
+    ksum = sum(ker)
+    logs = [math.log(v) for v in mults]
+    out = []
+    for i in range(n):
+        acc = 0.0
+        for d in range(-half, half + 1):
+            j = min(max(i + d, 0), n - 1)
+            acc += ker[d + half] * logs[j]
+        out.append(math.floor(math.exp(acc / ksum) * 1e6 + 0.5) / 1e6)
+    return out
+
+
 def resolve_meta(m):
     """Bake trim + speed into a compositor-ready meta: entry k must keep mapping to
     frames/f{k:05d}.jpg, so drops become repeat:0 and only the tail is truncated."""
@@ -69,6 +96,8 @@ def resolve_meta(m):
         if mult <= 0: continue
         for i in range(max(0, int(sp["from"])), min(n, int(sp["to"]))):
             mults[i] *= mult
+    ramp = m.get("speedRamp")
+    mults = smooth_mults(mults, m.get("fps", 60), RAMP_DEFAULT if ramp is None else float(ramp))
     acc = 0.0
     for i in range(n):
         if reps[i] == 0: continue

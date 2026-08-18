@@ -223,15 +223,21 @@ canonical length everywhere is the body without END_EXTRA, whose hold tail draws
 hatched extension past the end marker. Tracks: camera blocks as chips with the zoom
 label (click to select, then click the preview to set focus / scroll to zoom, drag chip
 edges to move transitions), stretchable hold pills (drag the right edge to retime),
-non-destructive speed regions as hatched overlays (drag across live frames, stored as
-`speed:[{from,to,mult}]`), draggable click dots / keycap chips, and trim handles.
+non-destructive speed regions as hatched overlays whose edges feather over the ramp
+width (drag across live frames, stored as `speed:[{from,to,mult}]`), draggable click
+dots / keycap chips, and trim handles. Speed changes ease in and out instead of jumping
+at region boundaries: multipliers are smoothed in log space with a raised-cosine kernel
+spanning `speedRamp` seconds (saved in the edited meta, default 0.6, 0 = hard cuts,
+editable in Advanced), identically in the server resolver and the JS preview so the
+preview's duration always equals the rendered frame count.
 Right-click anything on the timeline for a context menu (zoom stops, split/merge camera
 blocks via a `cut` flag on frames, hold presets in seconds, speed up a section, event
 add/edit/delete, trim/jump). Every edit goes through per-segment undo/redo (⌘Z / ⇧⌘Z,
 drags and slider scrubs coalesce into one entry). The inspector is preset-first:
-background swatches, corner/shadow/camera-feel/ending-hold/cursor/keycap segments, an
-overall-speed slider (0.5x-2x, saved as `pace` in the edited meta and composed with
-speed regions at resolve time), and quality/resolution for export; a selected camera
+background swatches, corner/shadow/camera-feel/ending-hold/cursor/keycap segments, and
+quality/resolution for export; speed is per clip only (Holds-track drag or a camera
+block's "Set speed" submenu — no master speed control; a legacy `pace` in old edited
+metas is still honored at resolve time). A selected camera
 block gets Wide/Slight/Medium/Close zoom stops, and other selections edit in seconds.
 Every raw knob (exact hexes, px values, EMAs, CRF, numeric z/cx/cy, trim entries) lives
 in the collapsed Advanced accordion, two-way synced: presets write the raw values,
@@ -239,8 +245,8 @@ hand-edited raw values flip the matching preset to a "Custom" chip.
 
 Save writes `meta.edited.json` + `knobs.json` into the segment dir; the original
 `meta.json` is never touched. Render runs this skill's `compositor.py` per segment with
-`META_FILE` (a baked `meta.render.json`: trim + pace + speed resolved via `repeat`
-counts, event indices remapped) and `KNOBS_JSON` (constant overrides); "Render all + concat" then
+`META_FILE` (a baked `meta.render.json`: trim + speed resolved via `repeat`
+counts with the eased multipliers, event indices remapped) and `KNOBS_JSON` (constant overrides); "Render all + concat" then
 ffmpeg-concats (`-c copy`) in rail order to `<workdir>/edited-full.mp4`. Without those
 env vars the compositor behaves exactly as before. Keep one panel scale across segments
 when concatenating.
