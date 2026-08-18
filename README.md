@@ -62,11 +62,11 @@ Then ask Claude Code to "make a demo video of ..." and it picks the skill up aut
 
 Add `--detach` to run the server in its own session: it prints the URL + pid and logs to `<workdir>/editor.log`. That keeps it alive when launched from an agent shell, where plain background tasks get reaped when the session's task manager stops them.
 
-The skill filming its own editor — scrubbing, retargeting a camera block from the right-click menu, swapping the background, changing the pace, undoing it all, resizing the timeline, then rendering a segment:
+![The editor: segment rail, live composited preview, camera/holds/events timeline, preset inspector](media/editor-dark.png)
 
-▶ [Watch the editor demo (60fps)](https://surajshetty3416.github.io/demo-video-skill/#interactive-editor)
+Right-click anywhere on the timeline for context actions — camera zoom stops, split/merge, trims, holds, speed regions — all undoable with ⌘Z:
 
-<!-- to embed the player inline, drag ~/Desktop/builder-ai-demo/editor-demo.mp4 into the GitHub web editor here -->
+![Context menu on a camera block, with the camera zoom panel open](media/editor-context-menu-dark.png)
 
 ## Using it without Claude Code
 
