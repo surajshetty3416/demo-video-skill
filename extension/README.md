@@ -1,12 +1,13 @@
 # Demo Video Recorder (Chrome extension)
 
 Record the current tab by hand and land it straight in the demo-video editor as
-a normal segment: raw tab pixels via `tabCapture` (no OS cursor baked in), plus
-an injected logger that stamps pointer moves, clicks and shortcut presses.
-`ingest.py` converts the pair into the same `frames/ + meta.json` bundle the
-Playwright capture produces, so the compositor and editor need no changes —
-the recording gets the same gradient/window/vector-cursor/pulse treatment, and
-all framing (zooms, focus, speed, trims) happens in the editor afterwards.
+a normal segment: tab pixels via `tabCapture`, plus an injected logger that
+stamps pointer moves, clicks and shortcut presses. `ingest.py` converts the
+pair into the same `frames/ + meta.json` bundle the Playwright capture
+produces, so the compositor and editor need no changes — the recording gets
+the gradient/window/pulse treatment plus an auto-framed camera derived from
+your clicks, and every shot stays editable (zooms, focus, speed, trims) in the
+editor afterwards.
 
 ## Install (once)
 
@@ -36,11 +37,13 @@ speed up dead air, trim the ends — same workflow as a scripted capture.
 
 ## What carries over vs. the scripted path
 
-- The compositor's cursor is drawn from the event log, so it stays crisp at
-  any zoom; clicks pulse and modifier shortcuts show keycaps automatically.
+- Chrome bakes the OS cursor into tab capture, so the recorded cursor is the
+  one viewers see (no overlay is drawn — it would double). Clicks pulse and
+  modifier shortcuts show keycaps automatically, from the event log.
+- The camera comes out pre-framed from your clicks: one steady shot per click
+  cluster, wide otherwise — reshape, split or flatten the blocks in the editor.
 - Static stretches collapse into `repeat` entries at ingest (the `still()`
-  economy, recovered after the fact); identical frames under a moving cursor
-  hardlink to one file.
+  economy, recovered after the fact); identical frames hardlink to one file.
 - Real-time capture can drop frames on a slow machine — the deterministic
   Playwright path remains the tool for perfectly repeatable showcases.
 

@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """Ingest a real-time browser recording into the capture bundle format.
 
-The Chrome extension (extension/) records the active tab with tabCapture (raw
-page pixels, no OS cursor) while an injected logger stamps pointer moves,
-clicks and shortcut presses with wall-clock ms. This turns that pair —
-rec.webm + recording.json in one segment dir — into exactly what
-capture_template.py produces: frames/f*.jpg + meta.json with a flat z=1
-camera (frame the shots afterwards in the editor).
+The Chrome extension (extension/) records the active tab with tabCapture
+while an injected logger stamps pointer moves, clicks and shortcut presses
+with wall-clock ms. This turns that pair — rec.webm + recording.json in one
+segment dir — into exactly what capture_template.py produces: frames/f*.jpg
++ meta.json, with an auto-framed camera derived from the click log (one
+steady shot per click cluster, wide otherwise) that the editor reshapes like
+any scripted capture.
+
+Chrome bakes the OS cursor into tab capture, so meta entries carry no mx/my
+and the compositor draws no overlay cursor (two cursors otherwise). The event
+log still powers click pulses, keycap hints and the collapse heuristic.
 
 Frames demux at a constant 60fps. Runs of byte-identical frames under a
 parked cursor collapse into `repeat` entries (the still() economy, recovered
@@ -25,6 +30,15 @@ JPEG_Q = "2"              # ffmpeg -q:v, ~quality 92 — matches Playwright capt
 STILL_PX = 1.0            # cursor drift below this collapses into a repeat
 GAP_MS = 120.0            # sample gaps beyond this mean a parked cursor: hold,
                           # don't creep — then ease in over the last GAP_MS
+
+CAM_LEAD = 45             # frames the camera starts moving before a shot's first click
+CAM_TAIL = 70             # frames it lingers after the shot's last click
+CAM_BRIDGE = 150          # a wide gap shorter than this carries straight to the next shot
+CLUSTER_GAP = 5 * FPS     # clicks this far apart (frames) still share a shot
+CLUSTER_R = 380           # ...if within this many CSS px of the shot centre
+CAM_MARGIN = 150          # context kept around a shot's click spread (CSS px)
+ZOOM_HI = 1.65            # hold-zoom cap (SKILL: ~1.5-1.9 reads best)
+ZOOM_MIN = 1.2            # a shot that fits looser than this stays wide
 
 
 def probe_size(video):
@@ -77,6 +91,49 @@ def mouse_track(events, t0, n, w, h):
 
 def frame_of(t, t0, n):
     return max(0, min(n - 1, int((t - t0) * FPS / 1000.0)))
+
+
+def cluster_clicks(clicks):
+    groups = []
+    for f, x, y in clicks:
+        g = groups[-1] if groups else None
+        if (g and f - g["last"] <= CLUSTER_GAP
+                and abs(x - g["cx"]) <= CLUSTER_R and abs(y - g["cy"]) <= CLUSTER_R):
+            g["pts"].append((x, y)); g["last"] = f
+            g["cx"] = sum(p[0] for p in g["pts"]) / len(g["pts"])
+            g["cy"] = sum(p[1] for p in g["pts"]) / len(g["pts"])
+        else:
+            groups.append({"pts": [(x, y)], "first": f, "last": f, "cx": x, "cy": y})
+    return groups
+
+
+def shot_zoom(g, w, h):
+    xs = [p[0] for p in g["pts"]]
+    ys = [p[1] for p in g["pts"]]
+    z = min(w / (max(xs) - min(xs) + 2 * CAM_MARGIN),
+            h / (max(ys) - min(ys) + 2 * CAM_MARGIN))
+    return min(ZOOM_HI, z) if z >= ZOOM_MIN else 1.0
+
+
+def camera_track(clicks, n, w, h):
+    """Auto-framing per the skill's cinematography rules: one steady shot per
+    click cluster — the camera targets the cluster centre a beat before its
+    first click, holds through the action, releases after — wide everywhere
+    else. Short wide gaps carry straight to the next shot (no pumping)."""
+    cam = [(w / 2, h / 2, 1.0)] * n
+    spans = []
+    for g in cluster_clicks(clicks):
+        z = shot_zoom(g, w, h)
+        if z <= 1.0:
+            continue
+        spans.append([max(0, g["first"] - CAM_LEAD), min(n, g["last"] + CAM_TAIL),
+                      (g["cx"], g["cy"], z)])
+    for i, (a, b, t) in enumerate(spans):
+        if i and 0 < a - spans[i - 1][1] < CAM_BRIDGE:
+            a = spans[i - 1][1]
+        for k in range(a, b):
+            cam[k] = t
+    return cam
 
 
 def file_hashes(frames_dir, n):
@@ -137,7 +194,9 @@ def ingest_dir(seg):
     clicks = [(frame_of(e["t"], t0, n), e["x"], e["y"]) for e in events if e.get("k") == "c"]
     keys = [(frame_of(e["t"], t0, n), e["text"]) for e in events
             if e.get("k") == "k" and e.get("text")]
+    cam = camera_track(clicks, n, cssw, cssh)
     breaks = {f for f, _, _ in clicks} | {f for f, _ in keys}
+    breaks |= {k for k in range(1, n) if cam[k] != cam[k - 1]}
 
     hashes = file_hashes(os.path.join(seg, "frames"), n)
     entries = build_entries(hashes, mice, breaks)
@@ -149,8 +208,8 @@ def ingest_dir(seg):
 
     frames = []
     for e in entries:
-        mx, my = mice[e["src"]]
-        fr = {"cx": round(cssw / 2, 1), "cy": round(cssh / 2, 1), "z": 1.0, "mx": mx, "my": my}
+        cx, cy, z = cam[e["src"]]
+        fr = {"cx": round(cx, 1), "cy": round(cy, 1), "z": round(z, 3)}
         if e["repeat"] > 1:
             fr["repeat"] = e["repeat"]
         frames.append(fr)

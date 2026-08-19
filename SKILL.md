@@ -208,16 +208,20 @@ working instance (a canvas block-reorder demo: 5 layout tiles + a center-drop fi
 ## Manual recording (browser extension)
 
 For takes a human should drive by hand, `extension/` is an unpacked Chrome
-extension that records the current tab (tabCapture: raw page pixels, no OS
-cursor) while an injected logger stamps mouse moves, clicks and shortcut
-presses. On stop it uploads webm + events to the editor server's `/api/import`,
-where `ingest.py` converts them into a normal capture bundle: 60fps demux,
-per-frame cursor interpolated from the event log (parked gaps hold, then ease
-in over ~120ms), byte-identical still runs collapsed into `repeat` entries
-(identical frames under a moving cursor hardlink to one file), and click/key
-frames forced onto their own entry so pulses/keycaps land exactly. The camera
-comes out flat (z=1) — all framing happens in the editor, which is the point:
-record flat, direct in post. Everything downstream is unchanged.
+extension that records the current tab (tabCapture) while an injected logger
+stamps mouse moves, clicks and shortcut presses. On stop it uploads webm +
+events to the editor server's `/api/import`, where `ingest.py` converts them
+into a normal capture bundle: 60fps demux, byte-identical still runs collapsed
+into `repeat` entries (identical frames hardlink to one file), and click/key
+frames forced onto their own entry so pulses/keycaps land exactly. Chrome
+bakes the OS cursor into tab capture, so recorded metas carry no mx/my and the
+compositor draws no overlay cursor (it would double) — pulses and keycaps
+still come from the event log. The camera gets auto-framing from the click
+log per the cinematography rules above: one steady shot per click cluster
+(push in a beat before the first click, hold through the action, release
+after; short wide gaps carry straight to the next shot), wide elsewhere —
+then direct the rest in the editor as normal camera blocks. Everything
+downstream is unchanged.
 
 Setup and flow: see `extension/README.md`. Run the server with `--port` (e.g.
 8787) so the extension's stored server URL survives restarts; the workdir may
