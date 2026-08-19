@@ -20,6 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 EDITOR_DIR = os.path.dirname(os.path.abspath(__file__))
 COMPOSITOR = os.path.join(os.path.dirname(EDITOR_DIR), "compositor.py")
+RECPILL = os.path.join(EDITOR_DIR, "recpill.py")
 DIST_DIR = os.path.join(EDITOR_DIR, "ui", "dist")
 CTYPES = {".html": "text/html", ".js": "text/javascript", ".css": "text/css",
           ".svg": "image/svg+xml", ".woff2": "font/woff2", ".woff": "font/woff",
@@ -174,6 +175,7 @@ class RenderJob:
 class Handler(BaseHTTPRequestHandler):
     workdir = None
     job = None
+    port = 0
     imports = {}
     imports_lock = threading.Lock()
     protocol_version = "HTTP/1.1"
@@ -233,6 +235,7 @@ class Handler(BaseHTTPRequestHandler):
                 if parts[3] == "frames": return self.import_frames(imp, body)
                 if parts[3] == "events": return self.import_events(imp, body)
                 if parts[3] == "finish": return self.import_finish(imp, body)
+                if parts[3] == "stop": return self.import_stop(imp)
             self.send(404, {"error": "not found"})
         except (BrokenPipeError, ConnectionResetError):
             pass
@@ -317,6 +320,12 @@ class Handler(BaseHTTPRequestHandler):
                                   "times": [], "events": list(body.get("events") or [])}
         if mode == "frames":
             os.makedirs(os.path.join(seg, "raw"))
+            # a topmost OS window is the only recording overlay the capture
+            # can't see; skipped silently when tkinter is missing
+            if not os.environ.get("NO_REC_PILL"):
+                self.imports[name]["pill"] = subprocess.Popen(
+                    [sys.executable, RECPILL, name, str(self.port)],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
             with open(os.path.join(seg, "recording.json"), "w") as f:
                 json.dump({**self.imports[name]["manifest"],
@@ -331,7 +340,11 @@ class Handler(BaseHTTPRequestHandler):
                     f.write(base64.b64decode(fr["d"]))
                 imp["times"].append(int(fr["t"]))
                 seq += 1
-        self.send(200, {"ok": True, "count": seq})
+        self.send(200, {"ok": True, "count": seq, "stop": imp.get("stopRequested", False)})
+
+    def import_stop(self, imp):
+        imp["stopRequested"] = True
+        self.send(200, {"ok": True})
 
     def import_events(self, imp, body):
         with self.imports_lock:
@@ -375,6 +388,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send(200, {"ok": True})
 
     def convert(self, imp):
+        if imp.get("pill"):
+            imp["pill"].terminate()
         try:
             imp["summary"] = ingest_dir(imp["dir"])
             imp["status"] = "done"
@@ -384,8 +399,8 @@ class Handler(BaseHTTPRequestHandler):
     def import_status(self, name):
         imp = self.imports.get(name)
         if not imp: return self.send(404, {"error": "unknown import"})
-        self.send(200, {"status": imp["status"], "error": imp["error"],
-                        "segment": name, "summary": imp.get("summary")})
+        self.send(200, {"status": imp["status"], "error": imp["error"], "segment": name,
+                        "stop": imp.get("stopRequested", False), "summary": imp.get("summary")})
 
     def render(self, body):
         segs = discover_segments(self.workdir)
@@ -468,6 +483,7 @@ def main():
     Handler.workdir = workdir
     Handler.job = RenderJob()
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    Handler.port = httpd.server_address[1]
     print(f"demo-video editor: http://127.0.0.1:{httpd.server_address[1]}/  (workdir: {workdir})", flush=True)
     httpd.serve_forever()
 

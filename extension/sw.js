@@ -14,7 +14,7 @@
 
 const S = chrome.storage.session;
 const FLUSH_N = 12, FLUSH_MS = 600;
-let frameBuf = [], eventBuf = [], flushTimer = null, lastSession = null;
+let frameBuf = [], eventBuf = [], flushTimer = null, lastSession = null, stopPoll = null;
 
 async function session() {
   return (await S.get("session")).session || null;
@@ -69,10 +69,12 @@ async function start({ streamId, server, name, mode }) {
 
 async function stop() {
   const s = await session();
-  if (s?.tabId) chrome.tabs.sendMessage(s.tabId, { cmd: "logger-stop" }).catch(() => {});
+  if (!s || !["starting", "recording"].includes(s.phase)) return { ok: true };
+  clearInterval(stopPoll); stopPoll = null;
+  if (s.tabId) chrome.tabs.sendMessage(s.tabId, { cmd: "logger-stop" }).catch(() => {});
   await patch({ phase: "uploading" });
   badge("↑", "#4f46e5");
-  if (s?.mode === "frames") finishCast(s).catch((e) => castError(e));
+  if (s.mode === "frames") finishCast(s).catch((e) => castError(e));
   else await chrome.runtime.sendMessage({ cmd: "offscreen-stop" });
   return { ok: true };
 }
@@ -82,8 +84,7 @@ async function recDone(msg) {
   await patch({ phase: "done", segment: msg.segment });
   badge("✓", "#16a34a");
   setTimeout(() => chrome.action.setBadgeText({ text: "" }), 8000);
-  const { openEditor = true } = await chrome.storage.local.get("openEditor");
-  if (openEditor && s?.server) chrome.tabs.create({ url: s.server });
+  if (s?.server) chrome.tabs.create({ url: s.server });
   chrome.offscreen.closeDocument().catch(() => {});
   return {};
 }
@@ -110,7 +111,8 @@ chrome.tabs.onUpdated.addListener(async (tabId, info) => {
   }
 });
 
-/* ---------- REC pill (separate window: visible, never captured) ---------- */
+/* ---------- REC pill window (baked mode only — frames mode gets the
+   server-side topmost pill from editor/recpill.py instead) ---------- */
 
 async function openPill() {
   const s = await session();
@@ -168,8 +170,16 @@ async function startCast(tab, server, name) {
     maxWidth: Math.ceil(page.w * page.dpr), maxHeight: Math.ceil(page.h * page.dpr),
   });
   badge("REC", "#dc2626");
-  openPill();
   await injectLogger(tab.id);
+  // the server-side topmost pill requests stop out of band; frames-flush
+  // responses carry the flag too, this poll covers fully static pages
+  stopPoll = setInterval(async () => {
+    const s = lastSession || (await session());
+    if (!s?.id || s.phase !== "recording") return;
+    const st = await fetch(`${s.server}/api/import/${s.id}/status`)
+      .then((r) => r.json()).catch(() => null);
+    if (st?.stop) stop();
+  }, 2000);
   return { ok: true };
 }
 
@@ -214,9 +224,12 @@ async function flushCast() {
   const base = `${s.server}/api/import/${s.id}`;
   if (frameBuf.length) {
     const frames = frameBuf.splice(0);
-    await fetch(base + "/frames", { method: "POST",
+    const res = await fetch(base + "/frames", { method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ frames }) }).catch(() => frameBuf.unshift(...frames));
+      body: JSON.stringify({ frames }) })
+      .then((r) => r.json())
+      .catch(() => (frameBuf.unshift(...frames), null));
+    if (res?.stop) stop();
   }
   if (eventBuf.length) {
     const events = eventBuf.splice(0);
@@ -227,6 +240,7 @@ async function flushCast() {
 }
 
 async function finishCast(s, detached) {
+  clearInterval(stopPoll); stopPoll = null;
   if (!detached) {
     await chrome.debugger.sendCommand({ tabId: s.tabId }, "Page.stopScreencast").catch(() => {});
     await sleep(500); // let the logger's final batch land

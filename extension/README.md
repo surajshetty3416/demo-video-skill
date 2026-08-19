@@ -8,24 +8,19 @@ and editor need no changes — the recording gets the gradient/window/pulse
 treatment plus an auto-framed camera derived from your clicks, and every shot
 stays editable (zooms, focus, speed, trims) in the editor afterwards.
 
-Two cursor modes (popup toggle):
+Capture goes through CDP screencast (`chrome.debugger`), whose pixels carry NO
+cursor; the compositor draws its crisp vector cursor from the event log, so
+cursor size/visibility stay editable (cursor-hide ranges work). Chrome shows a
+"started debugging this browser" banner while recording — expected; dismissing
+it stops the take (what already streamed is salvaged). Keep the tab focused: a
+backgrounded tab stops producing frames. (A `tabCapture` webm path with the
+baked OS cursor still exists in the code — `mode: "baked"` — but has no UI.)
 
-- **Drawn (default)** — captures via CDP screencast (`chrome.debugger`), whose
-  pixels carry NO cursor; the compositor draws its crisp vector cursor from
-  the event log, so cursor size/visibility stay editable (cursor-hide ranges
-  work). Chrome shows a "started debugging this browser" banner while
-  recording — expected; dismissing it stops the take (what already streamed
-  is salvaged). Keep the tab focused: a backgrounded tab stops producing
-  frames.
-- **As recorded** — captures via `tabCapture` + MediaRecorder. Chrome bakes
-  the OS cursor into those pixels, so what you see is what you get (no
-  overlay is drawn; it would double). Use when the debugger banner is
-  unacceptable.
-
-While recording, a small floating **REC pill** (its own tiny window, bottom
-right of the browser window) shows a pulsing dot + elapsed time and stops the
-take on click. It is a separate window, so it never appears in the recording —
-drag it anywhere.
+While recording, a small always-on-top **REC pill** floats at the bottom right
+of the screen (spawned by the editor server, `editor/recpill.py`): pulsing dot,
+elapsed time, Stop button. It is a separate OS window, so it stays visible over
+Chrome yet never appears in the recording — drag it anywhere. When a take
+lands, the editor opens in a new tab automatically.
 
 ## Install (once)
 
@@ -43,13 +38,12 @@ drag it anywhere.
    ```
 
 2. Open the tab you want to record, click the extension icon, check the server
-   URL, take name and cursor mode, hit **Start recording**. The popup closes;
-   the REC pill and toolbar badge appear.
+   URL and take name, hit **Start recording**. The popup closes; the REC pill
+   and toolbar badge appear.
 3. Do the demo in the tab.
-4. Click **Stop** on the pill (or the toolbar icon → Stop). In drawn mode
-   frames streamed during recording, so saving is nearly instant; the segment
-   appears in the editor rail (a fresh editor tab opens if "Open editor when
-   done" is checked).
+4. Click **Stop** on the pill (or the toolbar icon → Stop). Frames streamed
+   during recording, so saving is nearly instant; the segment appears in the
+   editor rail and the editor opens in a new tab.
 
 Then direct it in the editor: the click-cluster auto-framing gives a first
 pass — reshape, split or flatten the camera blocks, speed up dead air, trim
