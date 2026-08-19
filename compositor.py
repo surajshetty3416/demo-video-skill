@@ -55,7 +55,7 @@ KEY_FONTS = ["/System/Library/Fonts/SFNSRounded.ttf", "/System/Library/Fonts/SFN
              "/System/Library/Fonts/Helvetica.ttc", "/Library/Fonts/Arial Unicode.ttf",
              "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
 CRF, PRESET = 18, "fast"  # libx264 quality/speed
-WORKERS = max(2, (os.cpu_count() or 8) - 2)
+WORKERS = 0               # 0 = auto: sized from physical RAM below (env overrides)
 # KNOBS_JSON: path to a json whose keys override the constants above (editor/).
 if os.environ.get("KNOBS_JSON"):
     globals().update(json.load(open(os.environ["KNOBS_JSON"])))
@@ -84,6 +84,23 @@ PANEL_H = round(PANEL_W*SH/SW); PANEL_H -= PANEL_H % 2
 BG_W = (PANEL_W+2*MARGIN); BG_W -= BG_W % 2
 BG_H = (PANEL_H+2*MARGIN); BG_H -= BG_H % 2
 
+def phys_ram():
+    try:
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (ValueError, OSError, AttributeError):
+        return 8 << 30
+
+# each worker peaks at roughly interpreter + one decoded source + a handful of
+# canvas-sized buffers; keep the pool inside a quarter of physical RAM (the OS,
+# browser and ffmpeg need the rest, especially on small machines)
+LOWMEM = phys_ram() < (4 << 30)
+if os.environ.get("WORKERS"):
+    WORKERS = int(os.environ["WORKERS"])
+if not WORKERS:
+    per_worker = 50e6 + SW*SH*3 + 6*BG_W*BG_H*3
+    WORKERS = max(1, min((os.cpu_count() or 8) - 2, 3 if LOWMEM else 64,
+                         int(phys_ram() / 4 / per_worker)))
+
 def lerp(a,b,t): return tuple(round(a[i]+(b[i]-a[i])*t) for i in range(3))
 def grad(t):
     for i in range(len(GRAD)-1):
@@ -105,7 +122,6 @@ def build_bg(ss=8):
     return bg.resize((BG_W,BG_H), Image.BILINEAR)
 
 bg_base = build_bg()
-DARK = Image.new("RGB",(BG_W,BG_H),(15,23,42))
 
 # the window's drop shadow follows it as it scales/pans. Drawn at full res, then
 # blurred at 1/8 scale: the downscale keeps the sub-pixel position, so the shadow
@@ -236,7 +252,7 @@ def render(job):
         out = view
     else:
         out = bg_base.copy()
-        out.paste(DARK, (0,0), shadow(ox, oy, pw, ph, zc))
+        out.paste((15,23,42), (0,0), shadow(ox, oy, pw, ph, zc))
         m = Image.new("L",(x1-x0, y1-y0),0)
         ImageDraw.Draw(m).rounded_rectangle([ox-x0, oy-y0, ox+pw-x0, oy+ph-y0],
                                             radius=max(1,round(RAD*zc)), fill=255)
@@ -278,10 +294,13 @@ def main():
 
     out = os.path.join(WORKDIR, "demo.mp4")
     log = open(os.path.join(WORKDIR, "ffmpeg.log"), "w")
+    # LOWMEM trims x264's lookahead/refs and threads: same CRF, visually
+    # indistinguishable, hundreds of MB less encoder state on small machines
+    lowmem = ["-threads","2","-x264-params","ref=2:rc-lookahead=20"] if LOWMEM else []
     ff = subprocess.Popen(
         ["ffmpeg","-y","-f","image2pipe","-vcodec","mjpeg","-framerate",str(FPS),"-i","-",
          "-vf","scale=in_range=full:out_range=limited,format=yuv420p",
-         "-c:v","libx264","-preset",PRESET,"-crf",str(CRF),
+         "-c:v","libx264","-preset",PRESET,"-crf",str(CRF), *lowmem,
          "-colorspace","bt709","-color_primaries","bt709","-color_trc","bt709","-color_range","tv",
          "-r",str(FPS),"-movflags","+faststart",out],
         stdin=subprocess.PIPE, stdout=log, stderr=log)

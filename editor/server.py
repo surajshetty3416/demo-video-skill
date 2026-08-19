@@ -441,7 +441,12 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         with open(fpath, "rb") as f:
             f.seek(start)
-            self.wfile.write(f.read(length))
+            left = length
+            while left > 0:
+                chunk = f.read(min(1 << 20, left))
+                if not chunk: break
+                self.wfile.write(chunk)
+                left -= len(chunk)
 
 
 def spawn_detached(workdir, port):

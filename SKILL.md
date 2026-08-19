@@ -202,7 +202,9 @@ working instance (a canvas block-reorder demo: 5 layout tiles + a center-drop fi
 - `KEY_H` / `KEY_INSET` / `KEY_N` — keycap size, gap from the bottom edge, how long a
   shortcut hint stays up. `KEY_FONTS` — font candidates (needs ⌘/⇧/⌥ glyphs; macOS SF NS
   first, DejaVu Sans as the Linux fallback).
-- `CRF` / `PRESET` — libx264 quality/speed (18 / fast). `WORKERS` — render pool size.
+- `CRF` / `PRESET` — libx264 quality/speed (18 / fast). `WORKERS` — render pool size
+  (default auto-sizes to physical RAM ÷ per-worker footprint; low-RAM machines also
+  get trimmed x264 lookahead/refs at the same CRF).
 - `CURSOR_CSS_H` — drawn cursor size in page px (26 matches the old baked cursor).
 
 ## Manual recording (browser extension)

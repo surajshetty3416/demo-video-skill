@@ -295,6 +295,16 @@ export function resolvedToEdited(pf) {
 /* ---------- bitmap cache ---------- */
 const cache = new Map(), pendingSet = new Set();
 let fetchQueue = [], inflight = 0, wantedEntry = -1;
+// decoded frames are huge (a DSF-2 capture is ~19MB each): cap the cache by a
+// byte budget scaled to device RAM, not a fixed count
+const CACHE_BUDGET = ((navigator.deviceMemory || 8) >= 8 ? 600
+                      : (navigator.deviceMemory || 8) >= 4 ? 300 : 150) * 1e6;
+function cacheCap() {
+  const m = state.meta;
+  if (!m) return 24;
+  const bytes = m.clip.width * m.dsf * m.clip.height * m.dsf * 4;
+  return Math.max(12, Math.min(260, Math.floor(CACHE_BUDGET / bytes)));
+}
 const frameURL = (i) => `/api/segment/${encodeURIComponent(ui.seg)}/frame/${i}`;
 function requestFrame(i, urgent) {
   if (cache.has(i) || pendingSet.has(i)) return;
@@ -312,7 +322,8 @@ function pumpFetch() {
       .then((bm) => {
         if (seg !== ui.seg) { bm.close(); return; }
         cache.set(i, bm);
-        while (cache.size > 260) { const k = cache.keys().next().value; cache.get(k).close(); cache.delete(k); }
+        const cap = cacheCap();
+        while (cache.size > cap) { const k = cache.keys().next().value; cache.get(k).close(); cache.delete(k); }
         if (i === wantedEntry) schedule("preview");
       })
       .catch(() => {})
