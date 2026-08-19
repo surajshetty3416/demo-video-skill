@@ -52,81 +52,8 @@ def sanitize_knobs(k):
     return out
 
 
-# Speed transitions ease over this many seconds unless the meta overrides it.
-RAMP_DEFAULT = 0.6
-
-
-def smooth_mults(mults, fps, ramp):
-    """Ease speed changes: raised-cosine smoothing of per-entry multipliers in log
-    space, replicate-padded at the edges. Mirrored exactly in engine.js resolveMeta;
-    the 1e-6 rounding collapses libm-vs-V8 ulp drift so both sides resample the same
-    numbers. Uniform input is returned untouched (identity guarantee)."""
-    n = len(mults)
-    if n == 0 or all(v == mults[0] for v in mults): return mults
-    w = int(fps * max(ramp, 0) + 0.5) | 1
-    if w <= 1: return mults
-    half = (w - 1) // 2
-    ker = [1 + math.cos(math.pi * d / (half + 1)) for d in range(-half, half + 1)]
-    ksum = sum(ker)
-    logs = [math.log(v) for v in mults]
-    out = []
-    for i in range(n):
-        acc = 0.0
-        for d in range(-half, half + 1):
-            j = min(max(i + d, 0), n - 1)
-            acc += ker[d + half] * logs[j]
-        out.append(math.floor(math.exp(acc / ksum) * 1e6 + 0.5) / 1e6)
-    return out
-
-
-def resolve_meta(m):
-    """Bake trim + speed into a compositor-ready meta: entry k must keep mapping to
-    frames/f{k:05d}.jpg, so drops become repeat:0 and only the tail is truncated."""
-    frames = [dict(f) for f in m["frames"]]
-    n = len(frames)
-    trim = m.get("trim") or {}
-    tin, tout = int(trim.get("in", 0)), int(trim.get("out", n - 1))
-    reps = [int(f.get("repeat", 1)) for f in frames]
-    for i in range(n):
-        if i < tin or i > min(tout, n - 1): reps[i] = 0
-    pace = float(m.get("pace") or 1)
-    mults = [pace if pace > 0 else 1.0] * n
-    for sp in m.get("speed") or []:
-        mult = float(sp["mult"])
-        if mult <= 0: continue
-        for i in range(max(0, int(sp["from"])), min(n, int(sp["to"]))):
-            mults[i] *= mult
-    ramp = m.get("speedRamp")
-    mults = smooth_mults(mults, m.get("fps", 60), RAMP_DEFAULT if ramp is None else float(ramp))
-    acc = 0.0
-    for i in range(n):
-        if reps[i] == 0: continue
-        if mults[i] == 1:
-            acc = 0.0; continue
-        acc += reps[i] / mults[i]
-        k = int(acc); acc -= k
-        reps[i] = k
-    last = max((i for i in range(n) if reps[i] > 0), default=0)
-    frames, reps = frames[:last + 1], reps[:last + 1]
-    kept = [i for i in range(len(frames)) if reps[i] > 0]
-
-    def snap(i):
-        for k in kept:
-            if k >= i: return k
-        return kept[-1] if kept else None
-
-    for i, f in enumerate(frames):
-        f["repeat"] = reps[i]
-    out = {"dsf": m["dsf"], "fps": m.get("fps", 60), "clip": m["clip"], "frames": frames}
-    for key in ("clicks", "keys"):
-        evts = []
-        for e in m.get(key) or []:
-            j = snap(int(e["i"]))
-            if j is None: continue
-            e2 = dict(e); e2["i"] = j
-            evts.append(e2)
-        out[key] = evts
-    return out
+sys.path.insert(0, os.path.dirname(EDITOR_DIR))
+from resolve import needs_resolve, resolve_meta  # shared with compositor.py
 
 
 class RenderJob:
@@ -183,15 +110,16 @@ class RenderJob:
         slot = self.seg_slot(name)
         env = dict(os.environ)
         edited = os.path.join(path, "meta.edited.json")
-        if os.path.exists(edited):
-            resolved = resolve_meta(json.load(open(edited)))
+        src = edited if os.path.exists(edited) else os.path.join(path, "meta.json")
+        m = json.load(open(src))
+        if os.path.exists(edited) or needs_resolve(m):
+            resolved = resolve_meta(m)
             rpath = os.path.join(path, "meta.render.json")
             json.dump(resolved, open(rpath, "w"))
             env["META_FILE"] = rpath
             total = sum(f.get("repeat", 1) for f in resolved["frames"])
         else:
-            meta = json.load(open(os.path.join(path, "meta.json")))
-            total = sum(f.get("repeat", 1) for f in meta["frames"])
+            total = sum(f.get("repeat", 1) for f in m["frames"])
         with self.lock:
             slot["state"], slot["total"] = "running", total
         knobs = os.path.join(path, "knobs.json")
@@ -305,7 +233,7 @@ class Handler(BaseHTTPRequestHandler):
             has_edits = os.path.exists(edited)
             # playFrames must match the editor transport: resolved body, no END_EXTRA
             m = json.load(open(edited if has_edits else os.path.join(path, "meta.json")))
-            if has_edits:
+            if has_edits or needs_resolve(m):
                 m = resolve_meta(m)
             play = sum(f.get("repeat", 1) for f in m["frames"])
             out.append({"name": name, "entries": len(m["frames"]), "playFrames": play,

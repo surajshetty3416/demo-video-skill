@@ -102,6 +102,18 @@ reliable pattern for app demos: **create a throwaway fixture via the app's API i
 point `START_URL` at it, and delete it in `finally`.** Same input → identical frames → the
 compositor is a pure function of the capture.
 
+## Long waits: capture dense, compress in post
+
+When the app makes you wait (an AI build, a long job, a spinner), do NOT bake a
+timelapse into the capture by screenshotting at a slow interval — the discarded
+frames are unrecoverable and the pacing can never be slowed later. Instead shoot
+as fast as screenshots allow (~40ms between shots) and append a `speed` region to
+meta.json over that span: `{"from": startEntry, "to": endEntry, "mult": N}` with
+N sized so the DEFAULT playback matches the pacing you want. `compositor.py`
+resolves `speed`/`trim`/`speedRamp` from the meta natively (shared `resolve.py`),
+and the editor shows the region as an editable clip — the compression becomes a
+decision you can revisit, with eased transitions at the boundaries for free.
+
 ## The multi-case "tile" pattern (showcasing several behaviors)
 
 To demo N related behaviors in one video, build ONE fixture page laid out as a grid of

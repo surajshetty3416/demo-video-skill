@@ -66,6 +66,13 @@ FR = os.path.join(WORKDIR, "frames")
 
 # META_FILE: alternate meta json (editor renders meta.render.json; default unchanged)
 meta = json.load(open(os.environ.get("META_FILE") or os.path.join(WORKDIR, "meta.json")))
+if not os.environ.get("META_FILE"):
+    # captures may carry edit-time speed/trim (e.g. a dense lapse seeded with a
+    # speed region); resolve them here so plain renders honor the intended pacing
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from resolve import needs_resolve, resolve_meta
+    if needs_resolve(meta):
+        meta = resolve_meta(meta)
 clip, dsf, FPS = meta["clip"], meta["dsf"], meta.get("fps", 60)
 SW, SH = clip["width"]*dsf, clip["height"]*dsf
 
