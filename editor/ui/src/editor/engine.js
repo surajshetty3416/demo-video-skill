@@ -222,7 +222,10 @@ export function resolveMeta(m) {
   for (let i = 0; i < frames.length; i++) if (reps[i] > 0) kept.push(i);
   const snap = (i) => { for (const q of kept) if (q >= i) return q; return kept.length ? kept[kept.length - 1] : null; };
   const remap = (ev) => (ev || []).map((e) => ({ ...e, i: snap(e.i) })).filter((e) => e.i !== null);
-  return { frames, reps, kept, clicks: remap(m.clicks), keys: remap(m.keys) };
+  const hideCur = new Uint8Array(frames.length);
+  for (const r of m.cursorHide || [])
+    for (let i = Math.max(0, r.from); i < Math.min(frames.length, r.to); i++) hideCur[i] = 1;
+  return { frames, reps, kept, hideCur, clicks: remap(m.clicks), keys: remap(m.keys) };
 }
 
 export function rebuild() {
@@ -449,7 +452,7 @@ function drawPreview() {
     ctx.stroke();
   }
   const fr = state.res.frames[entry];
-  if (k.CURSOR_CSS_H > 0 && fr && fr.mx !== undefined && fr.mx !== null) {
+  if (k.CURSOR_CSS_H > 0 && fr && fr.mx !== undefined && fr.mx !== null && !state.res.hideCur[entry]) {
     const px = (ox + (fr.mx - clip.x) * dsf * s) * K, py = (oy + (fr.my - clip.y) * dsf * s) * K;
     const u = (size / 24) * K;
     ctx.save();
@@ -600,6 +603,7 @@ function palette() {
     line: v("--outline-gray-1"), edge: v("--outline-gray-2"), tick: v("--outline-gray-3"),
     ink: v("--ink-gray-9"), ink7: v("--ink-gray-7"), ink6: v("--ink-gray-6"), ink5: v("--ink-gray-5"),
     chipR: parseFloat(v("--chip-radius")) || 4,
+    speedTint: v("--speed-tint") || "#3b82f6", speedInk: v("--speed-ink") || "#1d4ed8",
     font: getComputedStyle(document.body).fontFamily,
   };
   return pal;
@@ -613,7 +617,7 @@ function chipRect(ctx, x, y, w, h) {
   ctx.roundRect(x, y, w, h, r);
 }
 export function themeChanged() {
-  pal = null; hatch = null;
+  pal = null; hatch = null; speedHatch = null;
   schedule("preview"); schedule("timeline");
 }
 // tokens may resolve to hex or solid oklch depending on the frappe-ui version
@@ -627,6 +631,17 @@ function withAlpha(color, a) {
   return color;
 }
 let hatch = null;
+let speedHatch = null;
+function speedHatchFor(ctx) {
+  if (speedHatch) return speedHatch;
+  const t = new OffscreenCanvas(7, 7), c = t.getContext("2d");
+  c.strokeStyle = withAlpha(palette().speedTint, 0.32);
+  c.lineWidth = 1.25;
+  c.beginPath(); c.moveTo(-2, 9); c.lineTo(9, -2); c.stroke();
+  speedHatch = ctx.createPattern(t, "repeat");
+  return speedHatch;
+}
+
 function hatchFor(ctx) {
   if (hatch) return hatch;
   const t = new OffscreenCanvas(7, 7), c = t.getContext("2d");
@@ -770,7 +785,7 @@ function drawHoldsRow(ctx, W, P) {
       ctx.fillStyle = withAlpha(P.base, 0.85);
       chipRect(ctx, x0 + 5, TL.TIM[0] + 5, w + 10, 16);
       ctx.fill();
-      ctx.fillStyle = P.ink7;
+      ctx.fillStyle = P.speedInk;
       ctx.fillText(label, x0 + 10, TL.TIM[0] + 13.5);
     }
   }
@@ -811,24 +826,24 @@ function drawHoldsRow(ctx, W, P) {
 // the chip itself suggests the eased transition instead of a hard cut.
 function drawSpeedRegion(ctx, P, x0, x1, fwL, fwR, selHere) {
   const y = TL.TIM[0] + 1, h = TL.TIM[1] - 2, w = x1 - x0;
-  const tint = withAlpha(P.strong, selHere ? 0.1 : 0.05);
+  const tint = withAlpha(P.speedTint, selHere ? 0.16 : 0.1);
   ctx.save();
   chipRect(ctx, x0, y, w, h);
   ctx.clip();
   if (fwL < 1 && fwR < 1) {
     ctx.fillStyle = tint;
     ctx.fillRect(x0, y, w, h);
-    ctx.fillStyle = hatchFor(ctx);
+    ctx.fillStyle = speedHatchFor(ctx);
     ctx.fillRect(x0, y, w, h);
   } else {
     const grad = ctx.createLinearGradient(x0, 0, x1, 0);
-    grad.addColorStop(0, withAlpha(P.strong, 0));
+    grad.addColorStop(0, withAlpha(P.speedTint, 0));
     grad.addColorStop(clamp(fwL / w, 0, 1), tint);
     grad.addColorStop(clamp(1 - fwR / w, 0, 1), tint);
-    grad.addColorStop(1, withAlpha(P.strong, 0));
+    grad.addColorStop(1, withAlpha(P.speedTint, 0));
     ctx.fillStyle = grad;
     ctx.fillRect(x0, y, w, h);
-    ctx.fillStyle = hatchFor(ctx);
+    ctx.fillStyle = speedHatchFor(ctx);
     const step = 3;
     for (let x = 0; x < fwL; x += step) {
       const sw = Math.min(step, fwL - x);
@@ -855,6 +870,17 @@ function drawSpeedRegion(ctx, P, x0, x1, fwL, fwR, selHere) {
 function drawEventsRow(ctx, W, P) {
   const m = state.meta, sel = ui.sel;
   const evy = TL.EVT[0] + TL.EVT[1] / 2;
+  const entryX = (e) =>
+    tlX(e >= m.frames.length ? state.eTotal : state.eStarts[clamp(e, 0, m.frames.length - 1)]);
+  ctx.save();
+  ctx.strokeStyle = withAlpha(P.ink5, 0.55);
+  ctx.setLineDash([2, 3]);
+  for (const r of m.cursorHide || []) {
+    const a = entryX(r.from), b2 = entryX(r.to);
+    if (b2 < 0 || a > W) continue;
+    ctx.beginPath(); ctx.moveTo(a, evy); ctx.lineTo(b2, evy); ctx.stroke();
+  }
+  ctx.restore();
   for (let ci = 0; ci < (m.clicks || []).length; ci++) {
     const c = m.clicks[ci], x = tlX(state.eStarts[clamp(c.i, 0, m.frames.length - 1)]);
     if (x < -8 || x > W + 8) continue;
@@ -1302,6 +1328,18 @@ export function buildContextMenu(ev) {
         { label: "0.5× (slow motion)", onClick: spanSpeed(0.5) },
         { label: "Normal 1×", onClick: spanSpeed(1) },
       ],
+    });
+    const hides = m.cursorHide || [];
+    const covered = hides.some((r) => r.from <= b.i0 && r.to >= b.i1 + 1);
+    items.push({
+      label: covered ? "Show cursor in this clip" : "Hide cursor in this clip",
+      disabled: state.knobs.CURSOR_CSS_H === 0,
+      onClick: () => applyEdit(() => {
+        m.cursorHide = (m.cursorHide || []).filter((r) => r.to <= b.i0 || r.from > b.i1);
+        if (!covered) m.cursorHide.push({ from: b.i0, to: b.i1 + 1 });
+        if (!m.cursorHide.length) delete m.cursorHide;
+        metaEdited();
+      }),
     });
     items.push({
       label: "Split at playhead",

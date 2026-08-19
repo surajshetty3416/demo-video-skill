@@ -73,6 +73,9 @@ def resolve_meta(m):
 
     for i, f in enumerate(frames):
         f["repeat"] = reps[i]
+    for r in m.get("cursorHide") or []:
+        for i in range(max(0, int(r["from"])), min(len(frames), int(r["to"]))):
+            frames[i]["mx"] = frames[i]["my"] = None
     out = {"dsf": m["dsf"], "fps": m.get("fps", 60), "clip": m["clip"], "frames": frames}
     for key in ("clicks", "keys"):
         evts = []
@@ -88,4 +91,5 @@ def resolve_meta(m):
 
 
 def needs_resolve(m):
-    return bool(m.get("speed") or m.get("trim") or (m.get("pace") and float(m["pace"]) != 1))
+    return bool(m.get("speed") or m.get("trim") or m.get("cursorHide")
+                or (m.get("pace") and float(m["pace"]) != 1))

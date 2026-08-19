@@ -10,9 +10,15 @@
   --chip-radius: 4px;
   --scrollbar-thumb: var(--surface-gray-4);
   --scrollbar-thumb-hover: var(--surface-gray-5);
+  /* speed regions are the one colored element in the timeline: blue = playback
+     rate, so they can't be confused with the neutral camera zoom chips */
+  --speed-tint: #3b82f6;
+  --speed-ink: #1d4ed8;
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
+  --speed-tint: #4c8dff;
+  --speed-ink: #8ab8ff;
 }
 
 html,
