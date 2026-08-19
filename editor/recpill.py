@@ -27,21 +27,38 @@ def api(path, post=False):
         return None
 
 root = tk.Tk()
+root.withdraw()
+# borderless non-activating HUD: on macOS Tk 9 NEITHER call works alone —
+# the style strips the title bar only once overrideredirect is also set
+try:
+    root.tk.call("::tk::unsupported::MacWindowStyle", "style", root._w, "help", "noActivates")
+except tk.TclError:
+    pass
 root.overrideredirect(True)
 root.attributes("-topmost", True)
-W, H = 180, 44
-root.geometry(f"{W}x{H}+{root.winfo_screenwidth() - W - 24}+{root.winfo_screenheight() - H - 70}")
-root.configure(bg="#0f172a")
 
-dot = tk.Canvas(root, width=12, height=12, bg="#0f172a", highlightthickness=0)
-dot_id = dot.create_oval(1, 1, 11, 11, fill="#dc2626", outline="")
-dot.place(x=14, y=(H - 12) // 2)
-label = tk.Label(root, text="0:00", fg="#f8fafc", bg="#0f172a",
-                 font=("Helvetica", 13))
-label.place(x=34, y=(H - 20) // 2)
-stop = tk.Label(root, text="Stop", fg="#f8fafc", bg="#334155",
-                font=("Helvetica", 12, "bold"), padx=10, pady=3)
-stop.place(x=W - 62, y=(H - 26) // 2)
+W, H = 176, 46
+try:
+    root.attributes("-transparent", True)
+    BG = "systemTransparent"
+except tk.TclError:
+    BG = "#0f172a"
+root.config(bg=BG)
+cv = tk.Canvas(root, width=W, height=H, bg=BG, highlightthickness=0)
+cv.pack()
+
+def rrect(x0, y0, x1, y1, r, **kw):
+    pts = [x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1,
+           x1 - r, y1, x0 + r, y1, x0, y1, x0, y1 - r, x0, y0 + r, x0, y0]
+    return cv.create_polygon(pts, smooth=True, **kw)
+
+body = rrect(0, 0, W, H, 23, fill="#0f172a", outline="")
+dot = cv.create_oval(18, H / 2 - 5, 28, H / 2 + 5, fill="#dc2626", outline="")
+timer = cv.create_text(40, H / 2, text="0:00", anchor="w", fill="#f8fafc",
+                       font=("Helvetica", 14))
+stop_bg = rrect(W - 70, 9, W - 12, H - 9, 14, fill="#334155", outline="")
+stop_tx = cv.create_text(W - 41, H / 2, text="Stop", fill="#f8fafc",
+                         font=("Helvetica", 12, "bold"))
 
 state = {"stopping": False, "misses": 0, "on": True}
 
@@ -49,19 +66,20 @@ def request_stop(_=None):
     if state["stopping"]:
         return
     state["stopping"] = True
-    label.config(text="Stopping…")
-    stop.place_forget()
+    cv.itemconfigure(stop_bg, state="hidden")
+    cv.itemconfigure(stop_tx, state="hidden")
+    cv.itemconfigure(timer, text="Stopping…")
     api("/stop", post=True)
 
 def blink():
     state["on"] = not state["on"]
-    dot.itemconfigure(dot_id, fill="#dc2626" if state["on"] or state["stopping"] else "#7f1d1d")
+    cv.itemconfigure(dot, fill="#dc2626" if state["on"] else "#7f1d1d")
     root.after(650, blink)
 
 def tick():
     if not state["stopping"]:
         s = int(time.time() - T0)
-        label.config(text=f"{s // 60}:{s % 60:02d}")
+        cv.itemconfigure(timer, text=f"{s // 60}:{s % 60:02d}")
     root.after(500, tick)
 
 def poll():
@@ -82,11 +100,14 @@ def press(e):
 def move(e):
     root.geometry(f"+{e.x_root - drag['x']}+{e.y_root - drag['y']}")
 
-for widget in (root, dot, label):
-    widget.bind("<Button-1>", press)
-    widget.bind("<B1-Motion>", move)
-stop.bind("<Button-1>", request_stop)
+for item in (body, dot, timer):
+    cv.tag_bind(item, "<Button-1>", press)
+    cv.tag_bind(item, "<B1-Motion>", move)
+for item in (stop_bg, stop_tx):
+    cv.tag_bind(item, "<Button-1>", request_stop)
 
+root.geometry(f"{W}x{H}+{root.winfo_screenwidth() - W - 24}+{root.winfo_screenheight() - H - 70}")
+root.deiconify()
 blink()
 tick()
 root.after(1000, poll)
