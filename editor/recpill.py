@@ -39,7 +39,7 @@ dot.place(x=14, y=(H - 12) // 2)
 label = tk.Label(root, text="0:00", fg="#f8fafc", bg="#0f172a",
                  font=("Helvetica", 13))
 label.place(x=34, y=(H - 20) // 2)
-stop = tk.Label(root, text="Stop", fg="#ffffff", bg="#dc2626",
+stop = tk.Label(root, text="Stop", fg="#f8fafc", bg="#334155",
                 font=("Helvetica", 12, "bold"), padx=10, pady=3)
 stop.place(x=W - 62, y=(H - 26) // 2)
 
