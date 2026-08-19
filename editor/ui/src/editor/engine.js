@@ -74,6 +74,7 @@ export const ui = reactive({
             segments: [], outputs: [], error: null },
   ctxOptions: [],
   prompt: null,
+  shortcuts: false,
 });
 
 const bump = () => { ui.rev++; };
@@ -873,7 +874,7 @@ function drawEventsRow(ctx, W, P) {
   const entryX = (e) =>
     tlX(e >= m.frames.length ? state.eTotal : state.eStarts[clamp(e, 0, m.frames.length - 1)]);
   ctx.save();
-  ctx.strokeStyle = withAlpha(P.ink5, 0.55);
+  ctx.strokeStyle = withAlpha(P.ink5, 0.35);
   ctx.setLineDash([2, 3]);
   for (const r of m.cursorHide || []) {
     const a = entryX(r.from), b2 = entryX(r.to);
@@ -881,6 +882,12 @@ function drawEventsRow(ctx, W, P) {
     ctx.beginPath(); ctx.moveTo(a, evy); ctx.lineTo(b2, evy); ctx.stroke();
   }
   ctx.restore();
+  for (const r of m.cursorHide || []) {
+    const a = entryX(r.from), b2 = entryX(r.to);
+    if (b2 < 0 || a > W) continue;
+    drawHiddenCursorGlyph(ctx, P, a + 7, evy);
+    if (b2 - a > 64) drawHiddenCursorGlyph(ctx, P, (a + b2) / 2, evy);
+  }
   for (let ci = 0; ci < (m.clicks || []).length; ci++) {
     const c = m.clicks[ci], x = tlX(state.eStarts[clamp(c.i, 0, m.frames.length - 1)]);
     if (x < -8 || x > W + 8) continue;
@@ -905,6 +912,30 @@ function drawEventsRow(ctx, W, P) {
     ctx.fillStyle = P.ink7;
     ctx.fillText(label, x + 4, evy + 0.5);
   }
+}
+
+// ~10px arrow cursor with a diagonal slash: marks a cursor-hidden range. The
+// lane-colored under-stroke cuts the slash out of the arrow so it stays legible.
+function drawHiddenCursorGlyph(ctx, P, x, y) {
+  const u = 10 / 22;
+  ctx.save();
+  ctx.translate(x - 12.5 * u, y - 11.5 * u);
+  ctx.scale(u, u);
+  ctx.beginPath();
+  for (let i = 0; i < CUR_PATH.length; i++) {
+    const [px, py] = CUR_PATH[i];
+    i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+  }
+  ctx.closePath();
+  ctx.fillStyle = P.ink5;
+  ctx.fill();
+  ctx.lineCap = "round";
+  for (const [color, width] of [[P.lane, 5], [P.ink5, 2.2]]) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.beginPath(); ctx.moveTo(4, 1); ctx.lineTo(21, 22); ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function drawTrimAndTail(ctx, W, P) {
@@ -1229,6 +1260,16 @@ export function setTrim(field, v) {
 export function deleteSelected() {
   const sel = ui.sel, m = state.meta;
   if (!sel) return;
+  if (sel.type === "cam") {
+    const blocks = camBlocks();
+    const bi = blocks.findIndex((b) => sel.entry >= b.i0 && sel.entry <= b.i1);
+    if (bi >= 0 && blocks.length > 1) mergeCamBlock(blocks[bi], blocks[bi - 1] || blocks[bi + 1]);
+    return;
+  }
+  if (sel.type === "still") {
+    applyEdit(() => setStillRepeat(sel.entry, 1));
+    return;
+  }
   applyEdit(() => {
     if (sel.type === "speed") m.speed.splice(sel.idx, 1);
     else if (sel.type === "click") m.clicks.splice(sel.idx, 1);
@@ -1269,6 +1310,13 @@ export function splitCamAtPlayhead(block) {
     metaEdited();
   });
 }
+export function splitAtPlayhead() {
+  const b = blockContaining(playheadEntry());
+  if (b) splitCamAtPlayhead(b);
+}
+export function trimAtPlayhead(field) {
+  applyEdit(() => setTrim(field, playheadEntry()));
+}
 export function mergeCamBlock(block, into) {
   applyEdit(() => {
     const m = state.meta;
@@ -1308,6 +1356,7 @@ export function buildContextMenu(ev) {
     const phEntry = entryAtPf(resolvedToEdited(Math.round(state.playhead)));
     items.push({
       label: "Set zoom",
+      icon: "lucide-zoom-in",
       submenu: [
         ...ZOOM_STOPS.map(([l, z]) => ({ label: `${l} ×${z}`, onClick: () => setCamZoomStop(z) })),
         { label: "Reset to ×1", onClick: () => setCamZoomStop(1) },
@@ -1323,6 +1372,7 @@ export function buildContextMenu(ev) {
     });
     items.push({
       label: "Set speed",
+      icon: "lucide-gauge",
       submenu: [
         ...[2, 4, 8].map((mult) => ({ label: `${mult}× faster`, onClick: spanSpeed(mult) })),
         { label: "0.5× (slow motion)", onClick: spanSpeed(0.5) },
@@ -1333,6 +1383,7 @@ export function buildContextMenu(ev) {
     const covered = hides.some((r) => r.from <= b.i0 && r.to >= b.i1 + 1);
     items.push({
       label: covered ? "Show cursor in this clip" : "Hide cursor in this clip",
+      icon: covered ? "lucide-mouse-pointer-2" : "lucide-mouse-pointer-ban",
       disabled: state.knobs.CURSOR_CSS_H === 0,
       onClick: () => applyEdit(() => {
         m.cursorHide = (m.cursorHide || []).filter((r) => r.to <= b.i0 || r.from > b.i1);
@@ -1343,16 +1394,19 @@ export function buildContextMenu(ev) {
     });
     items.push({
       label: "Split at playhead",
+      icon: "lucide-scissors",
       disabled: !(phEntry > b.i0 && phEntry <= b.i1),
       onClick: () => splitCamAtPlayhead(b),
     });
     items.push({
       label: "Merge into previous",
+      icon: "lucide-merge",
       disabled: bi <= 0,
       onClick: () => mergeCamBlock(b, blocks[bi - 1]),
     });
     items.push({
       label: "Delete (merge into neighbor)",
+      icon: "lucide-trash-2",
       disabled: blocks.length < 2,
       onClick: () => mergeCamBlock(b, blocks[bi - 1] || blocks[bi + 1]),
     });
@@ -1362,6 +1416,7 @@ export function buildContextMenu(ev) {
     const orig = segState()?.origReps?.[e] ?? 1;
     items.push({
       label: "Set hold",
+      icon: "lucide-timer",
       submenu: [
         ...[0.5, 1, 2, 4].map((s) => ({
           label: `${s}s`,
@@ -1376,13 +1431,14 @@ export function buildContextMenu(ev) {
         },
       ],
     });
-    items.push({ label: `Reset to captured length (${(orig / fps).toFixed(1)}s)`, onClick: () => applyEdit(() => setStillRepeat(e, orig)) });
-    items.push({ label: "Remove hold", onClick: () => applyEdit(() => setStillRepeat(e, 1)) });
+    items.push({ label: `Reset to captured length (${(orig / fps).toFixed(1)}s)`, icon: "lucide-timer-reset", onClick: () => applyEdit(() => setStillRepeat(e, orig)) });
+    items.push({ label: "Remove hold", icon: "lucide-timer-off", onClick: () => applyEdit(() => setStillRepeat(e, 1)) });
   } else if (hit.mode === "speedsel-existing") {
     const idx = hit.idx;
     select({ type: "speed", idx });
     items.push({
       label: "Edit speed…",
+      icon: "lucide-gauge",
       onClick: async () => {
         const v = await prompt({ title: "Section speed", label: "Speed (2 = twice as fast)", type: "number", value: m.speed[idx].mult });
         if (v !== null && parseFloat(v) > 0) applyEdit(() => setSpeedField(idx, "mult", parseFloat(v)));
@@ -1390,6 +1446,7 @@ export function buildContextMenu(ev) {
     });
     items.push({
       label: "Remove speed-up",
+      icon: "lucide-trash-2",
       onClick: () => applyEdit(() => { m.speed.splice(idx, 1); select(null); metaEdited(); }),
     });
   } else if (hit.mode === "speedsel") {
@@ -1404,6 +1461,7 @@ export function buildContextMenu(ev) {
     });
     items.push({
       label: "Speed up this section",
+      icon: "lucide-gauge",
       submenu: [
         ...[2, 4, 8].map((mult) => ({ label: `${mult}× faster`, onClick: mkSpeed(mult) })),
         { label: "0.5× (slow motion)", onClick: mkSpeed(0.5) },
@@ -1411,21 +1469,23 @@ export function buildContextMenu(ev) {
     });
   } else if (hit.mode === "clickdrag") {
     select({ type: "click", idx: hit.idx });
-    items.push({ label: "Delete click pulse", onClick: () => applyEdit(() => { m.clicks.splice(hit.idx, 1); select(null); metaEdited(); }) });
+    items.push({ label: "Delete click pulse", icon: "lucide-trash-2", onClick: () => applyEdit(() => { m.clicks.splice(hit.idx, 1); select(null); metaEdited(); }) });
   } else if (hit.mode === "keydrag") {
     select({ type: "key", idx: hit.idx });
     items.push({
       label: "Edit text…",
+      icon: "lucide-pencil",
       onClick: async () => {
         const v = await prompt({ title: "Keycap hint", label: "Text (e.g. ⌘+Enter)", type: "text", value: m.keys[hit.idx].text });
         if (v !== null && v !== "") applyEdit(() => setEventField({ type: "key", idx: hit.idx }, "text", v));
       },
     });
-    items.push({ label: "Delete keycap", onClick: () => applyEdit(() => { m.keys.splice(hit.idx, 1); select(null); metaEdited(); }) });
+    items.push({ label: "Delete keycap", icon: "lucide-trash-2", onClick: () => applyEdit(() => { m.keys.splice(hit.idx, 1); select(null); metaEdited(); }) });
   } else if (y >= TL.EVT[0] && y <= TL.EVT[0] + TL.EVT[1]) {
-    items.push({ label: "Add click pulse at this time", onClick: () => addClickAt(entry) });
+    items.push({ label: "Add click pulse at this time", icon: "lucide-mouse-pointer-click", onClick: () => addClickAt(entry) });
     items.push({
       label: "Add keycap at this time…",
+      icon: "lucide-keyboard",
       onClick: async () => {
         const v = await prompt({ title: "Add keycap hint", label: "Text (e.g. ⌘+Enter)", type: "text", value: "⌘+Enter" });
         if (v !== null && v !== "") addKeyAt(entry, v);
@@ -1438,9 +1498,9 @@ export function buildContextMenu(ev) {
     {
       group: "Timeline",
       options: [
-        { label: "Trim start here", onClick: () => applyEdit(() => setTrim("in", entry)) },
-        { label: "Trim end here", onClick: () => applyEdit(() => setTrim("out", entry)) },
-        { label: "Move playhead here", onClick: () => setPlayhead(editedToResolved(pf)) },
+        { label: "Trim start here", icon: "lucide-arrow-right-to-line", onClick: () => applyEdit(() => setTrim("in", entry)) },
+        { label: "Trim end here", icon: "lucide-arrow-left-to-line", onClick: () => applyEdit(() => setTrim("out", entry)) },
+        { label: "Move playhead here", icon: "lucide-flag", onClick: () => setPlayhead(editedToResolved(pf)) },
       ],
     },
   ];
@@ -1503,12 +1563,36 @@ export async function saveSegment(name) {
   const info = ui.segments.find((s) => s.name === name);
   if (info) {
     info.hasEdits = true;
+    info.label = st.meta.label ?? null;
     info.playFrames = resolveMeta(st.meta).reps.reduce((a, b) => a + b, 0);
   }
   if (name === ui.seg) {
     ui.saveLabel = "saved";
     syncHistoryUI();
   }
+}
+
+/* display name: `label` from the segment's meta, falling back to the dir name
+   (the dir name stays the canonical id in every API call) */
+export function segLabel(name) {
+  ui.rev;
+  const st = state.segStates.get(name);
+  if (st) return st.meta.label || name;
+  const info = ui.segments.find((s) => s.name === name);
+  return info?.label || name;
+}
+
+export async function renameSegment(name) {
+  if (name && name !== ui.seg) await loadSegment(name);
+  const v = await prompt({ title: "Rename segment", label: "Name", type: "text",
+                           value: state.meta.label || ui.seg });
+  if (v === null) return;
+  const label = v.trim();
+  applyEdit(() => {
+    if (label && label !== ui.seg) state.meta.label = label;
+    else delete state.meta.label;
+    metaEdited();
+  });
 }
 
 /* ---------- render ---------- */
@@ -1569,6 +1653,7 @@ export function schedule(what) {
 }
 
 /* ---------- init ---------- */
+// keyboard shortcuts live in shortcuts.js (useShortcut, registered by App.vue)
 export async function init() {
   ui.segments = await (await fetch("/api/segments")).json();
   const names = ui.segments.map((s) => s.name);
@@ -1576,23 +1661,6 @@ export async function init() {
   try { order = JSON.parse(localStorage.getItem("demo-editor-order") || "[]"); } catch {}
   ui.order = [...order.filter((n) => names.includes(n)), ...names.filter((n) => !order.includes(n))];
   if (ui.order.length) await loadSegment(ui.order[0]);
-
-  window.addEventListener("keydown", (ev) => {
-    const t = ev.target;
-    const typing = t && (t.tagName === "TEXTAREA" || (t.tagName === "INPUT" && t.type !== "range"));
-    if ((ev.metaKey || ev.ctrlKey) && (ev.key === "z" || ev.key === "Z")) {
-      if (typing) return;
-      ev.preventDefault();
-      ev.shiftKey ? redo() : undo();
-      return;
-    }
-    if (typing) return;
-    if (ev.code === "Space") { ev.preventDefault(); togglePlay(); }
-    else if (ev.key === "ArrowRight") { ev.preventDefault(); stepFrame(ev.shiftKey ? 10 : 1); }
-    else if (ev.key === "ArrowLeft") { ev.preventDefault(); stepFrame(ev.shiftKey ? -10 : -1); }
-    else if (ev.key === "Delete" || ev.key === "Backspace") deleteSelected();
-    else if ((ev.metaKey || ev.ctrlKey) && ev.key === "s") { ev.preventDefault(); saveSegment(); }
-  });
 }
 
 export function setOrder(order) {

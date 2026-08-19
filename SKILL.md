@@ -225,7 +225,10 @@ cursor) is hardcoded, since it must match the rendered mp4.
 
 `<workdir>` is a segment dir (frames/ + meta.json) or a dir of segment dirs.
 Screen-Studio-style UI: segment rail (thumbnail + name + duration, drag-to-reorder =
-concat order), live preview canvas that replicates the compositor exactly (gradient,
+concat order; double-click the name or right-click → Rename to give a segment a display
+label, stored as `label` in the edited meta and shown in the rail, top bar, and render
+output rows — the directory name stays the id in every API), live preview canvas that
+replicates the compositor exactly (gradient,
 rounded window + shadow, EMA camera, cursor, pulses, keycaps), and one integrated
 timeline: a transport cluster (play/pause + current/total time) and Camera / Holds /
 Events track names in a left gutter, then a single ruler + playhead shared by all
@@ -242,10 +245,18 @@ at region boundaries: multipliers are smoothed in log space with a raised-cosine
 spanning `speedRamp` seconds (saved in the edited meta, default 0.6, 0 = hard cuts,
 editable in Advanced), identically in the server resolver and the JS preview so the
 preview's duration always equals the rendered frame count.
-Right-click anything on the timeline for a context menu (zoom stops, split/merge camera
-blocks via a `cut` flag on frames, hold presets in seconds, speed up a section, event
-add/edit/delete, trim/jump). Every edit goes through per-segment undo/redo (⌘Z / ⇧⌘Z,
-drags and slider scrubs coalesce into one entry). The inspector is preset-first:
+Cursor-hidden ranges on the Events lane draw a small slashed-cursor glyph at the range
+start (and centered when wide) over a subtle dashed line, in the theme's ink colors.
+Right-click anything on the timeline for a context menu with monochrome lucide icons
+(zoom stops, split/merge camera blocks via a `cut` flag on frames, hold presets in
+seconds, speed up a section, event add/edit/delete, trim/jump). Every edit goes through
+per-segment undo/redo (drags and slider scrubs coalesce into one entry).
+Keyboard shortcuts (registered via frappe-ui's useShortcut; ⌘? or the top-bar "?" opens
+the built-in KeyboardShortcutsModal cheat sheet): Space play/pause, ←/→ step one frame,
+⇧←/⇧→ jump one second, I/O set trim in/out at the playhead, S split the camera block
+under the playhead, Delete/Backspace delete the selection (event marker or speed
+region; a camera block merges into its neighbor, a still drops its hold), ⌘Z/⇧⌘Z
+undo/redo, ⌘S save — all silent while an input or dialog has focus. The inspector is preset-first:
 background swatches, corner/shadow/camera-feel/ending-hold/cursor/keycap segments, and
 quality/resolution for export; speed is per clip only (Holds-track drag or a camera
 block's "Set speed" submenu — no master speed control; a legacy `pace` in old edited

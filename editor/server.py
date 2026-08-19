@@ -233,11 +233,12 @@ class Handler(BaseHTTPRequestHandler):
             has_edits = os.path.exists(edited)
             # playFrames must match the editor transport: resolved body, no END_EXTRA
             m = json.load(open(edited if has_edits else os.path.join(path, "meta.json")))
+            label = m.get("label")  # resolve_meta drops non-frame keys, read it first
             if has_edits or needs_resolve(m):
                 m = resolve_meta(m)
             play = sum(f.get("repeat", 1) for f in m["frames"])
             out.append({"name": name, "entries": len(m["frames"]), "playFrames": play,
-                        "fps": m.get("fps", 60), "hasEdits": has_edits})
+                        "fps": m.get("fps", 60), "hasEdits": has_edits, "label": label})
         self.send(200, out)
 
     def seg_meta(self, seg, name):

@@ -27,7 +27,7 @@
             class="flex items-center justify-between text-xs"
           >
             <span :class="s.state === 'pending' ? 'text-ink-gray-4' : 'text-ink-gray-7'">
-              {{ s.name === "combine" ? "Combine into one video" : s.name }}
+              {{ s.name === "combine" ? "Combine into one video" : disp(s.name) }}
             </span>
             <IconCheck v-if="s.state === 'done'" class="h-3.5 w-3.5 text-ink-gray-7" />
             <span v-else-if="s.state === 'running'" class="tabular-nums text-ink-gray-5">
@@ -44,7 +44,7 @@
             :key="o.url"
             class="flex items-center justify-between rounded bg-surface-gray-1 py-1.5 pl-2.5 pr-1.5"
           >
-            <span class="text-xs text-ink-gray-8">{{ o.label }}</span>
+            <span class="text-xs text-ink-gray-8">{{ disp(o.label) }}</span>
             <div class="flex items-center gap-2">
               <span class="text-xs tabular-nums text-ink-gray-5">{{ fmtSize(o.bytes) }}</span>
               <Button size="sm" label="Open" @click="open(o.url)" />
@@ -80,7 +80,10 @@ import IconCheck from "~icons/lucide/check";
 import IconLoader from "~icons/lucide/loader-2";
 import IconAlert from "~icons/lucide/alert-circle";
 import IconChevron from "~icons/lucide/chevron-right";
-import { ui } from "../editor/engine.js";
+import { segLabel, ui } from "../editor/engine.js";
+
+// server rows carry segment dir names; show the user label when one exists
+const disp = (n) => (ui.segments.some((s) => s.name === n) ? segLabel(n) : n);
 
 const details = ref(false);
 const log = ref(null);
