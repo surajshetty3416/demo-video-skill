@@ -13,6 +13,9 @@
   .check { display: flex; align-items: center; gap: 6px; margin-top: 10px;
            font-size: 12px; color: #475569; }
   .check input { margin: 0; }
+  .seg { display: flex; gap: 12px; font-size: 12px; color: #475569; }
+  .seg label { display: flex; align-items: center; gap: 4px; margin: 0; font-size: 12px; }
+  .seg input { margin: 0; }
   button { width: 100%; margin-top: 12px; padding: 8px 0; border: none; border-radius: 6px;
            background: #0f172a; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
   button:hover { background: #1e293b; }
@@ -30,6 +33,11 @@
   <input type="text" id="server" spellcheck="false" placeholder="http://127.0.0.1:8787">
   <label for="name">Take name</label>
   <input type="text" id="name" spellcheck="false" placeholder="recording">
+  <label>Cursor</label>
+  <div class="seg">
+    <label><input type="radio" name="mode" value="frames" checked> Drawn (editable)</label>
+    <label><input type="radio" name="mode" value="baked"> As recorded</label>
+  </div>
   <div class="check">
     <input type="checkbox" id="open" checked>
     <label for="open" style="margin:0">Open editor when done</label>

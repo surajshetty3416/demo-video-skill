@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body { display: flex; align-items: center; gap: 10px; padding: 0 14px;
+         background: #0f172a; color: #f8fafc; box-sizing: border-box;
+         font: 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         user-select: none; }
+  #dot { width: 10px; height: 10px; border-radius: 50%; background: #dc2626;
+         animation: pulse 1.4s ease-in-out infinite; flex: none; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+  #label { flex: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #stopBtn { border: none; border-radius: 5px; padding: 6px 10px; font: inherit;
+             font-weight: 600; background: #dc2626; color: #fff; cursor: pointer; }
+  #stopBtn:hover { background: #b91c1c; }
+  body.busy #dot { background: #818cf8; animation: none; }
+  body.done #dot { background: #16a34a; animation: none; }
+  body.err  #dot { background: #f59e0b; animation: none; }
+</style>
+</head>
+<body>
+  <div id="dot"></div>
+  <div id="label">0:00</div>
+  <button id="stopBtn">Stop</button>
+  <script src="rec.js"></script>
+</body>
+</html>

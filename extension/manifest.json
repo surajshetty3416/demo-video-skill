@@ -3,7 +3,7 @@
   "name": "Demo Video Recorder",
   "version": "1.0",
   "description": "Record the current tab and its input events straight into the demo-video editor.",
-  "permissions": ["tabCapture", "offscreen", "scripting", "storage"],
+  "permissions": ["tabCapture", "offscreen", "scripting", "storage", "debugger"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "sw.js" },
   "action": { "default_popup": "popup.html", "default_title": "Demo Recorder" },

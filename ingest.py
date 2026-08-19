@@ -1,29 +1,34 @@
 #!/usr/bin/env python3
 """Ingest a real-time browser recording into the capture bundle format.
 
-The Chrome extension (extension/) records the active tab with tabCapture
-while an injected logger stamps pointer moves, clicks and shortcut presses
-with wall-clock ms. This turns that pair — rec.webm + recording.json in one
-segment dir — into exactly what capture_template.py produces: frames/f*.jpg
-+ meta.json, with an auto-framed camera derived from the click log (one
-steady shot per click cluster, wide otherwise) that the editor reshapes like
-any scripted capture.
+The Chrome extension (extension/) records the active tab while an injected
+logger stamps pointer moves, clicks and shortcut presses with wall-clock ms.
+Two capture modes land here as a segment dir and come out as exactly what
+capture_template.py produces — frames/f*.jpg + meta.json with an auto-framed
+camera derived from the click log (one steady shot per click cluster, wide
+otherwise) that the editor reshapes like any scripted capture:
 
-Chrome bakes the OS cursor into tab capture, so meta entries carry no mx/my
-and the compositor draws no overlay cursor (two cursors otherwise). The event
-log still powers click pulses, keycap hints and the collapse heuristic.
+- "frames" (default, drawn cursor): CDP screencast JPEGs streamed during
+  recording (raw/r*.jpg + times.json). Screencast pixels carry NO cursor, so
+  meta gets mx/my and the compositor draws its crisp vector cursor — cursor
+  visibility stays editable. Timestamped frames resample onto the 60fps grid;
+  idle gaps become `repeat` entries for free.
+- "webm" (recorded cursor): a tabCapture MediaRecorder file (rec.webm).
+  Chrome bakes the OS cursor into those pixels, so meta entries carry no
+  mx/my (an overlay would double it). 60fps demux + byte-identical runs
+  collapse into repeats.
 
-Frames demux at a constant 60fps. Runs of byte-identical frames under a
-parked cursor collapse into `repeat` entries (the still() economy, recovered
-after the fact); identical frames under a moving cursor stay separate entries
-but hardlink to one file, so disk cost stays near the collapsed size. Frames
-carrying a click/key always start their own entry, so pulses and keycaps land
-on the exact frame they happened.
+In both modes identical frames hardlink to one file, click/key frames force
+an entry boundary so pulses/keycaps land exactly, and the event log powers
+pulses, keycaps and the collapse heuristic.
 
-Usage:  python3 ingest.py <segment-dir>     (dir holding rec.webm + recording.json)
+Usage:  python3 ingest.py <segment-dir>     (dir holding recording.json + raw
+                                             frames or rec.webm)
 """
 import hashlib, json, os, subprocess, sys
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
+
+from PIL import Image
 
 FPS = 60
 JPEG_Q = "2"              # ffmpeg -q:v, ~quality 92 — matches Playwright captures
@@ -49,11 +54,15 @@ def probe_size(video):
     return int(w), int(h)
 
 
-def demux(video, frames_dir, sw, sh, log):
+def clear_frames(frames_dir):
     os.makedirs(frames_dir, exist_ok=True)
     for f in os.listdir(frames_dir):
         if f.startswith("f") and f.endswith((".jpg", ".png")):
             os.remove(os.path.join(frames_dir, f))
+
+
+def demux(video, frames_dir, sw, sh, log):
+    clear_frames(frames_dir)
     subprocess.check_call(
         ["ffmpeg", "-y", "-i", video,
          "-vf", f"fps={FPS},scale={sw}:{sh}:flags=lanczos",
@@ -136,6 +145,18 @@ def camera_track(clicks, n, w, h):
     return cam
 
 
+def event_tracks(rec, t0, n, cssw, cssh):
+    events = rec.get("events") or []
+    mice = mouse_track(events, t0, n, cssw, cssh)
+    clicks = [(frame_of(e["t"], t0, n), e["x"], e["y"]) for e in events if e.get("k") == "c"]
+    keys = [(frame_of(e["t"], t0, n), e["text"]) for e in events
+            if e.get("k") == "k" and e.get("text")]
+    cam = camera_track(clicks, n, cssw, cssh)
+    breaks = {f for f, _, _ in clicks} | {f for f, _ in keys}
+    breaks |= {k for k in range(1, n) if cam[k] != cam[k - 1]}
+    return mice, clicks, keys, cam, breaks
+
+
 def file_hashes(frames_dir, n):
     hs = []
     for k in range(n):
@@ -144,13 +165,14 @@ def file_hashes(frames_dir, n):
     return hs
 
 
-def build_entries(hashes, mice, breaks):
-    """Group demuxed frames into meta entries: identical pixels + parked
-    cursor extend a repeat; frames in `breaks` (click/key) start their own."""
-    entries, i, n = [], 0, len(hashes)
+def build_entries(pix, mice, breaks):
+    """Group output frames into meta entries: identical pixels + parked cursor
+    extend a repeat; frames in `breaks` (click/key/camera change) start their
+    own. `pix` is any per-frame pixel identity (content hash or raw index)."""
+    entries, i, n = [], 0, len(pix)
     while i < n:
         j = i + 1
-        while (j < n and j not in breaks and hashes[j] == hashes[i]
+        while (j < n and j not in breaks and pix[j] == pix[i]
                and abs(mice[j][0] - mice[i][0]) <= STILL_PX
                and abs(mice[j][1] - mice[i][1]) <= STILL_PX):
             j += 1
@@ -160,9 +182,9 @@ def build_entries(hashes, mice, breaks):
 
 
 def materialize(entries, frames_dir, hashes, n):
-    """Rewrite frames so entry j maps to f{j:05d}.jpg. Entry index never
-    exceeds its source index, so renaming in ascending order can't clobber an
-    unconsumed source; equal content becomes hardlinks (one copy on disk)."""
+    """Rewrite demuxed frames so entry j maps to f{j:05d}.jpg. Entry index
+    never exceeds its source index, so renaming in ascending order can't
+    clobber an unconsumed source; equal content becomes hardlinks."""
     first = {}
     path = lambda k: os.path.join(frames_dir, f"f{k:05d}.jpg")
     for j, e in enumerate(entries):
@@ -180,36 +202,38 @@ def materialize(entries, frames_dir, hashes, n):
             os.remove(path(k))
 
 
-def ingest_dir(seg):
-    video = os.path.join(seg, "rec.webm")
-    rec = json.load(open(os.path.join(seg, "recording.json")))
-    page, t0, events = rec["page"], rec["t0"], rec.get("events") or []
-    cssw, cssh = int(page["w"]), int(page["h"])
-    log = open(os.path.join(seg, "ingest.log"), "w")
-    vw, vh = probe_size(video)
-    dsf = max(1, round(vw / cssw))
-    n = demux(video, os.path.join(seg, "frames"), cssw * dsf, cssh * dsf, log)
+def materialize_raw(entries, grid, seg, sw, sh):
+    """Write frames/ for a streamed-frames recording: entry j hardlinks the
+    raw screencast JPEG it shows (resized once if its dims drifted)."""
+    fdir = os.path.join(seg, "frames")
+    clear_frames(fdir)
+    done = {}
+    for j, e in enumerate(entries):
+        r = grid[e["src"]]
+        dst = os.path.join(fdir, f"f{j:05d}.jpg")
+        if r in done:
+            os.link(done[r], dst)
+            continue
+        src = os.path.join(seg, "raw", f"r{r:06d}.jpg")
+        with Image.open(src) as img:
+            if img.size != (sw, sh):
+                img.convert("RGB").resize((sw, sh), Image.LANCZOS).save(dst, quality=92)
+            else:
+                os.link(src, dst)
+        done[r] = dst
 
-    mice = mouse_track(events, t0, n, cssw, cssh)
-    clicks = [(frame_of(e["t"], t0, n), e["x"], e["y"]) for e in events if e.get("k") == "c"]
-    keys = [(frame_of(e["t"], t0, n), e["text"]) for e in events
-            if e.get("k") == "k" and e.get("text")]
-    cam = camera_track(clicks, n, cssw, cssh)
-    breaks = {f for f, _, _ in clicks} | {f for f, _ in keys}
-    breaks |= {k for k in range(1, n) if cam[k] != cam[k - 1]}
 
-    hashes = file_hashes(os.path.join(seg, "frames"), n)
-    entries = build_entries(hashes, mice, breaks)
-    materialize(entries, os.path.join(seg, "frames"), hashes, n)
+def emit_meta(seg, rec, entries, cam, mice, clicks, keys, cssw, cssh, dsf, n, cursor):
     f2e = [0] * n
     for j, e in enumerate(entries):
         for k in range(e["src"], e["src"] + e["repeat"]):
             f2e[k] = j
-
     frames = []
     for e in entries:
         cx, cy, z = cam[e["src"]]
         fr = {"cx": round(cx, 1), "cy": round(cy, 1), "z": round(z, 3)}
+        if cursor:
+            fr["mx"], fr["my"] = mice[e["src"]]
         if e["repeat"] > 1:
             fr["repeat"] = e["repeat"]
         frames.append(fr)
@@ -223,13 +247,50 @@ def ingest_dir(seg):
     tmp = os.path.join(seg, "meta.json.tmp")
     json.dump(meta, open(tmp, "w"))
     os.replace(tmp, os.path.join(seg, "meta.json"))
-    summary = {"frames": n, "entries": len(entries), "dsf": dsf,
-               "clicks": len(clicks), "keys": len(keys)}
-    print(f"ingested {seg}: {summary}", file=log, flush=True)
-    return summary
+    return {"frames": n, "entries": len(entries), "dsf": dsf,
+            "clicks": len(clicks), "keys": len(keys), "cursor": "drawn" if cursor else "baked"}
+
+
+def ingest_webm(seg, rec):
+    page, t0 = rec["page"], rec["t0"]
+    cssw, cssh = int(page["w"]), int(page["h"])
+    log = open(os.path.join(seg, "ingest.log"), "w")
+    vw, vh = probe_size(os.path.join(seg, "rec.webm"))
+    dsf = max(1, round(vw / cssw))
+    fdir = os.path.join(seg, "frames")
+    n = demux(os.path.join(seg, "rec.webm"), fdir, cssw * dsf, cssh * dsf, log)
+    mice, clicks, keys, cam, breaks = event_tracks(rec, t0, n, cssw, cssh)
+    hashes = file_hashes(fdir, n)
+    entries = build_entries(hashes, mice, breaks)
+    materialize(entries, fdir, hashes, n)
+    return emit_meta(seg, rec, entries, cam, mice, clicks, keys, cssw, cssh, dsf, n, cursor=False)
+
+
+def ingest_frames(seg, rec):
+    page = rec["page"]
+    cssw, cssh = int(page["w"]), int(page["h"])
+    times = json.load(open(os.path.join(seg, "times.json")))
+    if not times:
+        raise RuntimeError("no frames were streamed")
+    t0 = times[0]
+    n = max(1, int((times[-1] - t0) * FPS / 1000.0) + 1)
+    grid = [max(0, bisect_right(times, t0 + k * 1000.0 / FPS) - 1) for k in range(n)]
+    mice, clicks, keys, cam, breaks = event_tracks(rec, t0, n, cssw, cssh)
+    entries = build_entries(grid, mice, breaks)
+    with Image.open(os.path.join(seg, "raw", "r000000.jpg")) as im:
+        dsf = max(1, round(im.width / cssw))
+    materialize_raw(entries, grid, seg, cssw * dsf, cssh * dsf)
+    return emit_meta(seg, rec, entries, cam, mice, clicks, keys, cssw, cssh, dsf, n, cursor=True)
+
+
+def ingest_dir(seg):
+    rec = json.load(open(os.path.join(seg, "recording.json")))
+    if rec.get("mode") == "frames":
+        return ingest_frames(seg, rec)
+    return ingest_webm(seg, rec)
 
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        sys.exit("usage: python3 ingest.py <segment-dir>  (with rec.webm + recording.json)")
+        sys.exit("usage: python3 ingest.py <segment-dir>")
     print(ingest_dir(sys.argv[1]))

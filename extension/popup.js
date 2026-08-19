@@ -57,21 +57,24 @@ async function render() {
 async function start() {
   const server = ($("server").value.trim() || DEFAULT_SERVER).replace(/\/+$/, "");
   const name = $("name").value.trim();
-  await chrome.storage.local.set({ server, openEditor: $("open").checked });
+  const mode = document.querySelector("input[name=mode]:checked").value;
+  await chrome.storage.local.set({ server, openEditor: $("open").checked, cursorMode: mode });
   status("Checking server…");
   try {
     await fetch(server + "/api/segments");
   } catch {
     return status(`Can't reach ${server} — is the editor server running?`, true);
   }
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  let streamId;
-  try {
-    streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
-  } catch (e) {
-    return status("Tab capture refused: " + (e?.message || e), true);
+  let streamId = null;
+  if (mode === "baked") {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    try {
+      streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
+    } catch (e) {
+      return status("Tab capture refused: " + (e?.message || e), true);
+    }
   }
-  const r = await chrome.runtime.sendMessage({ cmd: "start", streamId, server, name });
+  const r = await chrome.runtime.sendMessage({ cmd: "start", streamId, server, name, mode });
   if (r?.error) return status(r.error, true);
   window.close();
 }
@@ -90,9 +93,12 @@ $("main").addEventListener("click", async () => {
 chrome.storage.session.onChanged.addListener(render);
 
 (async () => {
-  const { server, openEditor = true } = await chrome.storage.local.get(["server", "openEditor"]);
+  const { server, openEditor = true, cursorMode = "frames" } =
+    await chrome.storage.local.get(["server", "openEditor", "cursorMode"]);
   $("server").value = server || DEFAULT_SERVER;
   $("open").checked = openEditor;
+  const radio = document.querySelector(`input[name=mode][value=${cursorMode}]`);
+  if (radio) radio.checked = true;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab?.title) $("name").value = tab.title;
   render();

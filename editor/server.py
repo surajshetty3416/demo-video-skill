@@ -15,7 +15,7 @@ The /api/import endpoints receive a real-time tab recording from the browser
 extension (extension/): a JSON manifest (page size, t0, input events), then the
 raw webm; ingest.py converts it into a normal segment that appears in the rail.
 """
-import json, math, os, re, subprocess, sys, threading, time
+import base64, json, math, os, re, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 EDITOR_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -227,6 +227,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.save(seg, body)
             if path == "/api/render": return self.render(body)
             if path == "/api/import": return self.import_start(body)
+            if len(parts) == 4 and parts[:2] == ["api", "import"]:
+                imp = self.imports.get(parts[2])
+                if not imp: return self.send(404, {"error": "unknown import"})
+                if parts[3] == "frames": return self.import_frames(imp, body)
+                if parts[3] == "events": return self.import_events(imp, body)
+                if parts[3] == "finish": return self.import_finish(imp, body)
             self.send(404, {"error": "not found"})
         except (BrokenPipeError, ConnectionResetError):
             pass
@@ -287,12 +293,16 @@ class Handler(BaseHTTPRequestHandler):
         self.send(200, {"ok": True})
 
     def import_start(self, body):
-        """Stage a recording import: claim a segment dir, store the manifest.
-        The webm follows on /api/import/<id>/video; the id doubles as the
+        """Stage a recording import: claim a segment dir, keep the manifest.
+        mode "webm" (default): the video follows on /api/import/<id>/video.
+        mode "frames": screencast JPEGs + events stream in DURING recording
+        via /frames and /events, then /finish converts. The id doubles as the
         segment (dir) name."""
-        page = body.get("page") or {}
-        if not page.get("w") or not page.get("h") or "t0" not in body:
-            return self.send(400, {"error": "need page{w,h} and t0"})
+        page, mode = body.get("page") or {}, body.get("mode") or "webm"
+        if not page.get("w") or not page.get("h"):
+            return self.send(400, {"error": "need page{w,h}"})
+        if mode == "webm" and "t0" not in body:
+            return self.send(400, {"error": "webm mode needs t0"})
         base = slugify(body.get("name") or page.get("title"))
         with self.imports_lock:
             name, k = base, 2
@@ -300,11 +310,54 @@ class Handler(BaseHTTPRequestHandler):
                 name, k = f"{base}-{k}", k + 1
             seg = os.path.join(self.workdir, name)
             os.makedirs(seg)
-            self.imports[name] = {"status": "awaiting-video", "error": None, "dir": seg}
-        with open(os.path.join(seg, "recording.json"), "w") as f:
-            json.dump({"name": body.get("name") or page.get("title"), "page": page,
-                       "t0": body["t0"], "events": body.get("events") or []}, f)
+            self.imports[name] = {"status": "recording" if mode == "frames" else "awaiting-video",
+                                  "error": None, "dir": seg, "mode": mode,
+                                  "manifest": {"mode": mode, "name": body.get("name") or page.get("title"),
+                                               "page": page, "t0": body.get("t0")},
+                                  "times": [], "events": list(body.get("events") or [])}
+        if mode == "frames":
+            os.makedirs(os.path.join(seg, "raw"))
+        else:
+            with open(os.path.join(seg, "recording.json"), "w") as f:
+                json.dump({**self.imports[name]["manifest"],
+                           "events": self.imports[name]["events"]}, f)
         self.send(200, {"id": name})
+
+    def import_frames(self, imp, body):
+        with self.imports_lock:
+            seq = len(imp["times"])
+            for fr in body.get("frames") or []:
+                with open(os.path.join(imp["dir"], "raw", f"r{seq:06d}.jpg"), "wb") as f:
+                    f.write(base64.b64decode(fr["d"]))
+                imp["times"].append(int(fr["t"]))
+                seq += 1
+        self.send(200, {"ok": True, "count": seq})
+
+    def import_events(self, imp, body):
+        with self.imports_lock:
+            imp["events"].extend(body.get("events") or [])
+        self.send(200, {"ok": True})
+
+    def import_finish(self, imp, body):
+        with self.imports_lock:
+            imp["events"].extend(body.get("events") or [])
+            order = sorted(range(len(imp["times"])), key=lambda i: imp["times"][i])
+            if order != list(range(len(order))):   # frames may arrive out of order
+                for pos, i in enumerate(order):
+                    os.rename(os.path.join(imp["dir"], "raw", f"r{i:06d}.jpg"),
+                              os.path.join(imp["dir"], "raw", f"t{pos:06d}.jpg"))
+                for pos in range(len(order)):
+                    os.rename(os.path.join(imp["dir"], "raw", f"t{pos:06d}.jpg"),
+                              os.path.join(imp["dir"], "raw", f"r{pos:06d}.jpg"))
+                imp["times"].sort()
+        with open(os.path.join(imp["dir"], "times.json"), "w") as f:
+            json.dump(imp["times"], f)
+        with open(os.path.join(imp["dir"], "recording.json"), "w") as f:
+            json.dump({**imp["manifest"], "t0": imp["times"][0] if imp["times"] else None,
+                       "events": imp["events"]}, f)
+        imp["status"] = "converting"
+        threading.Thread(target=self.convert, args=(imp,), daemon=True).start()
+        self.send(200, {"ok": True})
 
     def import_video(self, name):
         imp = self.imports.get(name)

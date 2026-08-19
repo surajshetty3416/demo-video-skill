@@ -208,20 +208,23 @@ working instance (a canvas block-reorder demo: 5 layout tiles + a center-drop fi
 ## Manual recording (browser extension)
 
 For takes a human should drive by hand, `extension/` is an unpacked Chrome
-extension that records the current tab (tabCapture) while an injected logger
-stamps mouse moves, clicks and shortcut presses. On stop it uploads webm +
-events to the editor server's `/api/import`, where `ingest.py` converts them
-into a normal capture bundle: 60fps demux, byte-identical still runs collapsed
-into `repeat` entries (identical frames hardlink to one file), and click/key
-frames forced onto their own entry so pulses/keycaps land exactly. Chrome
-bakes the OS cursor into tab capture, so recorded metas carry no mx/my and the
-compositor draws no overlay cursor (it would double) — pulses and keycaps
-still come from the event log. The camera gets auto-framing from the click
-log per the cinematography rules above: one steady shot per click cluster
-(push in a beat before the first click, hold through the action, release
-after; short wide gaps carry straight to the next shot), wide elsewhere —
-then direct the rest in the editor as normal camera blocks. Everything
-downstream is unchanged.
+extension that records the current tab while an injected logger stamps mouse
+moves, clicks and shortcut presses; a floating REC pill (its own tiny window,
+never captured) shows elapsed time and stops the take. Two cursor modes:
+the default "drawn" captures via CDP screencast (`chrome.debugger`) whose
+pixels carry NO cursor — timestamped JPEGs stream to the server during
+recording, and meta gets mx/my so the compositor draws its editable vector
+cursor (cursor-hide works); "as recorded" captures a tabCapture webm whose
+pixels have the OS cursor baked in (no overlay drawn — it would double).
+`ingest.py` converts either into a normal capture bundle: frames on the 60fps
+grid, still runs collapsed into `repeat` entries (identical frames hardlink
+to one file; screencast idle gaps make stills nearly free), and click/key
+frames forced onto their own entry so pulses/keycaps land exactly. The camera
+gets auto-framing from the click log per the cinematography rules above: one
+steady shot per click cluster (push in a beat before the first click, hold
+through the action, release after; short wide gaps carry straight to the next
+shot), wide elsewhere — then direct the rest in the editor as normal camera
+blocks. Everything downstream is unchanged.
 
 Setup and flow: see `extension/README.md`. Run the server with `--port` (e.g.
 8787) so the extension's stored server URL survives restarts; the workdir may
