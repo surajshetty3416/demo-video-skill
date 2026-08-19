@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Demo Video Recorder",
+  "version": "1.0",
+  "description": "Record the current tab and its input events straight into the demo-video editor.",
+  "permissions": ["tabCapture", "offscreen", "scripting", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "sw.js" },
+  "action": { "default_popup": "popup.html", "default_title": "Demo Recorder" },
+  "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" }
+}

@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 """Local fine-tuning editor for the demo-video pipeline.
 
-Usage:  python3 editor/server.py <workdir>
+Usage:  python3 editor/server.py [--detach] [--port N] <workdir>
 
 <workdir> is either a single segment dir (frames/ + meta.json) or a dir whose
-immediate children are segment dirs. Serves the editor UI on a free local port,
-lets the browser save meta.edited.json + knobs.json per segment (the original
-meta.json is never touched), and runs the skill's compositor.py per segment
-(META_FILE/KNOBS_JSON env) followed by an ffmpeg concat into edited-full.mp4.
+immediate children are segment dirs (it may start empty and fill up via
+imports). Serves the editor UI on a free local port (--port pins it, so the
+recorder extension can keep a stable server URL), lets the browser save
+meta.edited.json + knobs.json per segment (the original meta.json is never
+touched), and runs the skill's compositor.py per segment (META_FILE/KNOBS_JSON
+env) followed by an ffmpeg concat into edited-full.mp4.
+
+The /api/import endpoints receive a real-time tab recording from the browser
+extension (extension/): a JSON manifest (page size, t0, input events), then the
+raw webm; ingest.py converts it into a normal segment that appears in the rail.
 """
 import json, math, os, re, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -52,8 +58,14 @@ def sanitize_knobs(k):
     return out
 
 
+def slugify(s):
+    s = re.sub(r"[^a-z0-9]+", "-", (s or "").lower()).strip("-")
+    return s[:60] or "recording"
+
+
 sys.path.insert(0, os.path.dirname(EDITOR_DIR))
 from resolve import needs_resolve, resolve_meta  # shared with compositor.py
+from ingest import ingest_dir                    # recording -> segment converter
 
 
 class RenderJob:
@@ -162,6 +174,8 @@ class RenderJob:
 class Handler(BaseHTTPRequestHandler):
     workdir = None
     job = None
+    imports = {}
+    imports_lock = threading.Lock()
     protocol_version = "HTTP/1.1"
 
     def log_message(self, *a): pass
@@ -187,6 +201,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/segments": return self.list_segments()
             if path == "/api/render/status": return self.render_status()
             parts = path.strip("/").split("/")
+            if len(parts) == 4 and parts[:2] == ["api", "import"] and parts[3] == "status":
+                return self.import_status(parts[2])
             if len(parts) >= 4 and parts[:2] == ["api", "segment"]:
                 seg = self.segpath(parts[2])
                 if not seg: return self.send(404, {"error": "unknown segment"})
@@ -200,14 +216,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
-            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or b"{}"))
             path = self.path.split("?")[0]
             parts = path.strip("/").split("/")
+            if len(parts) == 4 and parts[:2] == ["api", "import"] and parts[3] == "video":
+                return self.import_video(parts[2])   # raw webm body, not JSON
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or b"{}"))
             if len(parts) == 4 and parts[:2] == ["api", "segment"] and parts[3] == "save":
                 seg = self.segpath(parts[2])
                 if not seg: return self.send(404, {"error": "unknown segment"})
                 return self.save(seg, body)
             if path == "/api/render": return self.render(body)
+            if path == "/api/import": return self.import_start(body)
             self.send(404, {"error": "not found"})
         except (BrokenPipeError, ConnectionResetError):
             pass
@@ -267,6 +286,54 @@ class Handler(BaseHTTPRequestHandler):
                 json.dump(sanitize_knobs(knobs), f, indent=1)
         self.send(200, {"ok": True})
 
+    def import_start(self, body):
+        """Stage a recording import: claim a segment dir, store the manifest.
+        The webm follows on /api/import/<id>/video; the id doubles as the
+        segment (dir) name."""
+        page = body.get("page") or {}
+        if not page.get("w") or not page.get("h") or "t0" not in body:
+            return self.send(400, {"error": "need page{w,h} and t0"})
+        base = slugify(body.get("name") or page.get("title"))
+        with self.imports_lock:
+            name, k = base, 2
+            while os.path.exists(os.path.join(self.workdir, name)):
+                name, k = f"{base}-{k}", k + 1
+            seg = os.path.join(self.workdir, name)
+            os.makedirs(seg)
+            self.imports[name] = {"status": "awaiting-video", "error": None, "dir": seg}
+        with open(os.path.join(seg, "recording.json"), "w") as f:
+            json.dump({"name": body.get("name") or page.get("title"), "page": page,
+                       "t0": body["t0"], "events": body.get("events") or []}, f)
+        self.send(200, {"id": name})
+
+    def import_video(self, name):
+        imp = self.imports.get(name)
+        if not imp: return self.send(404, {"error": "unknown import"})
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if length <= 0: return self.send(400, {"error": "empty body"})
+        with open(os.path.join(imp["dir"], "rec.webm"), "wb") as f:
+            left = length
+            while left > 0:
+                chunk = self.rfile.read(min(1 << 20, left))
+                if not chunk: break
+                f.write(chunk); left -= len(chunk)
+        imp["status"] = "converting"
+        threading.Thread(target=self.convert, args=(imp,), daemon=True).start()
+        self.send(200, {"ok": True})
+
+    def convert(self, imp):
+        try:
+            imp["summary"] = ingest_dir(imp["dir"])
+            imp["status"] = "done"
+        except Exception as e:
+            imp["status"], imp["error"] = "error", str(e)
+
+    def import_status(self, name):
+        imp = self.imports.get(name)
+        if not imp: return self.send(404, {"error": "unknown import"})
+        self.send(200, {"status": imp["status"], "error": imp["error"],
+                        "segment": name, "summary": imp.get("summary")})
+
     def render(self, body):
         segs = discover_segments(self.workdir)
         wanted = body.get("segments") or list(segs)
@@ -309,11 +376,11 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(f.read(length))
 
 
-def spawn_detached(workdir):
+def spawn_detached(workdir, port):
     log = os.path.join(workdir, "editor.log")
     offset = os.path.getsize(log) if os.path.exists(log) else 0
-    child = subprocess.Popen([sys.executable, os.path.abspath(__file__), workdir],
-                             stdout=open(log, "ab"), stderr=subprocess.STDOUT,
+    cmd = [sys.executable, os.path.abspath(__file__), "--port", str(port), workdir]
+    child = subprocess.Popen(cmd, stdout=open(log, "ab"), stderr=subprocess.STDOUT,
                              start_new_session=True)
     for _ in range(50):
         time.sleep(0.1)
@@ -329,17 +396,25 @@ def spawn_detached(workdir):
 
 
 def main():
-    args = [a for a in sys.argv[1:] if a != "--detach"]
-    if not args:
-        sys.exit("usage: python3 server.py [--detach] <workdir>")
+    args = sys.argv[1:]
+    detach, port = "--detach" in args, 0
+    args = [a for a in args if a != "--detach"]
+    if "--port" in args:
+        i = args.index("--port")
+        port = int(args[i + 1]); del args[i:i + 2]
+    if len(args) != 1:
+        sys.exit("usage: python3 server.py [--detach] [--port N] <workdir>")
     workdir = os.path.abspath(args[0])
+    if not os.path.isdir(workdir):
+        sys.exit(f"not a directory: {workdir}")
     if not discover_segments(workdir):
-        sys.exit(f"no segments found in {workdir} (need frames/ + meta.json)")
-    if len(args) != len(sys.argv) - 1:
-        return spawn_detached(workdir)
+        print(f"no segments in {workdir} yet — record one from the browser "
+              f"extension or add frames/ + meta.json dirs", flush=True)
+    if detach:
+        return spawn_detached(workdir, port)
     Handler.workdir = workdir
     Handler.job = RenderJob()
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print(f"demo-video editor: http://127.0.0.1:{httpd.server_address[1]}/  (workdir: {workdir})", flush=True)
     httpd.serve_forever()
 

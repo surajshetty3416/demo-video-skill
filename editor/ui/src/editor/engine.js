@@ -1654,13 +1654,29 @@ export function schedule(what) {
 
 /* ---------- init ---------- */
 // keyboard shortcuts live in shortcuts.js (useShortcut, registered by App.vue)
+let segListJson = "";
+async function refreshSegments() {
+  let list;
+  try { list = await (await fetch("/api/segments")).json(); } catch { return; }
+  const s = JSON.stringify(list);
+  if (s === segListJson) return;   // keep array identity stable between polls
+  segListJson = s;
+  ui.segments = list;
+  const names = list.map((x) => x.name);
+  ui.order = [...ui.order.filter((n) => names.includes(n)),
+              ...names.filter((n) => !ui.order.includes(n))];
+  if (!ui.seg && ui.order.length) await loadSegment(ui.order[0]);
+}
+
 export async function init() {
   ui.segments = await (await fetch("/api/segments")).json();
+  segListJson = JSON.stringify(ui.segments);
   const names = ui.segments.map((s) => s.name);
   let order = [];
   try { order = JSON.parse(localStorage.getItem("demo-editor-order") || "[]"); } catch {}
   ui.order = [...order.filter((n) => names.includes(n)), ...names.filter((n) => !order.includes(n))];
   if (ui.order.length) await loadSegment(ui.order[0]);
+  setInterval(refreshSegments, 3000);   // recordings imported mid-session join the rail
 }
 
 export function setOrder(order) {

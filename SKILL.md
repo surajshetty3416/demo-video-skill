@@ -1,6 +1,6 @@
 ---
 name: demo-video
-description: Produce a polished, ScreenStudio-style 60fps product demo video of a web app with a tiny, dependency-light pipeline — Playwright frame capture + a multiprocess Pillow compositor streaming into ffmpeg (no Node/Remotion). Drives the app one step per frame so playback is true 60fps regardless of capture speed, then renders a gradient background, a rounded window with a soft shadow, a crisp vector cursor, click pulses, keyboard-shortcut keycaps, and a cinematic push-in that scales the whole window and eases out at the end; HD=1 re-renders the same capture at retina resolution. Use whenever asked to create/record/improve a demo video, walkthrough, feature showcase, or screencast of a web UI.
+description: Produce a polished, ScreenStudio-style 60fps product demo video of a web app with a tiny, dependency-light pipeline — Playwright frame capture + a multiprocess Pillow compositor streaming into ffmpeg (no Node/Remotion). Drives the app one step per frame so playback is true 60fps regardless of capture speed, then renders a gradient background, a rounded window with a soft shadow, a crisp vector cursor, click pulses, keyboard-shortcut keycaps, and a cinematic push-in that scales the whole window and eases out at the end; HD=1 re-renders the same capture at retina resolution. Also ingests hand-driven takes recorded with the bundled Chrome extension (tab capture + input-event log) into the same pipeline and editor. Use whenever asked to create/record/improve a demo video, walkthrough, feature showcase, or screencast of a web UI.
 ---
 
 # Demo video (deterministic frames → Pillow compositor → ffmpeg)
@@ -205,10 +205,32 @@ working instance (a canvas block-reorder demo: 5 layout tiles + a center-drop fi
 - `CRF` / `PRESET` — libx264 quality/speed (18 / fast). `WORKERS` — render pool size.
 - `CURSOR_CSS_H` — drawn cursor size in page px (26 matches the old baked cursor).
 
+## Manual recording (browser extension)
+
+For takes a human should drive by hand, `extension/` is an unpacked Chrome
+extension that records the current tab (tabCapture: raw page pixels, no OS
+cursor) while an injected logger stamps mouse moves, clicks and shortcut
+presses. On stop it uploads webm + events to the editor server's `/api/import`,
+where `ingest.py` converts them into a normal capture bundle: 60fps demux,
+per-frame cursor interpolated from the event log (parked gaps hold, then ease
+in over ~120ms), byte-identical still runs collapsed into `repeat` entries
+(identical frames under a moving cursor hardlink to one file), and click/key
+frames forced onto their own entry so pulses/keycaps land exactly. The camera
+comes out flat (z=1) — all framing happens in the editor, which is the point:
+record flat, direct in post. Everything downstream is unchanged.
+
+Setup and flow: see `extension/README.md`. Run the server with `--port` (e.g.
+8787) so the extension's stored server URL survives restarts; the workdir may
+start empty. The rail polls `/api/segments` every 3s, so an imported take
+appears without a reload. `python3 ingest.py <dir>` re-converts a segment dir
+holding `rec.webm` + `recording.json` by hand if needed. Real-time capture can
+drop frames on a slow machine — scripted Playwright capture stays the tool for
+perfectly repeatable takes.
+
 ## Editor (interactive fine-tuning)
 
-`python3 editor/server.py --detach <workdir>` starts a local web editor (stdlib
-http.server on a free port), prints the URL + pid, and returns; the server runs in its
+`python3 editor/server.py --detach [--port N] <workdir>` starts a local web editor (stdlib
+http.server on a free port unless `--port` pins one), prints the URL + pid, and returns; the server runs in its
 own session with its output in `<workdir>/editor.log`, so it outlives the agent shell
 (a plain foreground or `run_in_background` launch gets reaped by the harness's task
 manager). Stop it later with `kill <pid>`. It serves the Vue app from `editor/ui/dist`;
