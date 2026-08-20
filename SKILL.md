@@ -177,7 +177,7 @@ working instance (a canvas block-reorder demo: 5 layout tiles + a center-drop fi
 - `cam(z, (fx,fy))` — set the camera **target** (zoom + focus in page px); compositor eases to it.
 - `move_to(x, y, n)` — ease the mouse to (x,y) over n captured frames (the main "action" verb).
   `jump(x,y)` — teleport without capturing.
-- `click(x, y)` — click + record an indigo pulse ring at that point.
+- `click(x, y)` — click + record a black pulse ring at that point.
 - `press("Meta+Enter")` — press a shortcut and show it as **keycaps at the bottom of the
   frame** (`⌘` + `Enter`) for ~1s. Modifier names are mapped to glyphs; pass a second arg
   to override the label. Use it for anything a viewer can't otherwise see (shortcuts,

@@ -7,7 +7,7 @@ import { reactive } from "vue";
 
 export const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
-const PULSE_COLOR = [99, 102, 241];
+const PULSE_COLOR = [10, 10, 12];
 const CUR_PATH = [[6.4,2],[6.4,18.9],[10.4,15.1],[12.9,20.9],[15.7,19.7],[13.2,13.9],[18.6,13.9]];
 const TIP = [6.4, 2];
 

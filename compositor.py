@@ -14,7 +14,7 @@ Output (in WORKDIR):  demo.mp4   (+ ffmpeg.log)
 meta.json = {"dsf":2, "fps":60, "clip":{"x","y","width","height"},
              "frames":[{"cx","cy","z", "mx"?,"my"?, "repeat"?}, ...],
              "clicks":[{"i","x","y"}, ...]?,   # frame index + position of each click;
-                                               # an indigo pulse ring animates there
+                                               # a black pulse ring animates there
              "keys":[{"i","text"}, ...]?}      # frame index + shortcut ("⌘+Enter"):
                                                # keycaps fade in at the bottom of the frame
   cx,cy = camera FOCUS point in page(CSS) px; z = zoom (1.0 = whole capture).
@@ -47,7 +47,7 @@ SHADOW_ALPHA = 120        # shadow strength (0..255)
 SHADOW_BLUR = 34          # shadow blur radius (scaled by PANEL_SCALE)
 CURSOR_CSS_H = 34         # cursor height in page CSS px (enlarged for legibility)
 PULSE_N = 18              # frames a click pulse ring lives (~0.3s)
-PULSE_COLOR = (99,102,241)
+PULSE_COLOR = (10,10,12)  # matches the cursor ink
 KEY_H = 46                # keycap height in output px (scaled by PANEL_SCALE)
 KEY_INSET = 34            # gap between the keycap row and the bottom of the frame
 KEY_N = 58                # frames a shortcut hint stays on screen (~1s)
