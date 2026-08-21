@@ -287,8 +287,10 @@ preview's duration always equals the rendered frame count.
 Cursor-hidden ranges on the Events lane draw a small slashed-cursor glyph at the range
 start (and centered when wide) over a subtle dashed line, in the theme's ink colors.
 Right-click anything on the timeline for a context menu with monochrome lucide icons
-(zoom stops, split/merge camera blocks via a `cut` flag on frames, hold presets in
-seconds, speed up a section, event add/edit/delete, trim/jump). Every edit goes through
+(zoom stops, split/merge camera blocks via a `cut` flag on frames, cut a section out
+of the video entirely — stored as `cuts:[{from,to}]`, drawn as a hatched span, and
+restorable from the same menu — hold presets in seconds, speed up a section, event
+add/edit/delete, trim/jump). Every edit goes through
 per-segment undo/redo (drags and slider scrubs coalesce into one entry).
 Keyboard shortcuts (registered via frappe-ui's useShortcut; ⌘? or the top-bar "?" opens
 the built-in KeyboardShortcutsModal cheat sheet): Space play/pause, ←/→ step one frame,

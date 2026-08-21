@@ -204,6 +204,8 @@ export function resolveMeta(m) {
   const tin = trim.in ?? 0, tout = Math.min(trim.out ?? n - 1, n - 1);
   let reps = m.frames.map((f) => f.repeat ?? 1);
   for (let i = 0; i < n; i++) if (i < tin || i > tout) reps[i] = 0;
+  for (const r of m.cuts || [])
+    for (let i = Math.max(0, r.from); i < Math.min(n, r.to); i++) reps[i] = 0;
   const pace = m.pace > 0 ? m.pace : 1;
   let mults = new Array(n).fill(pace);
   for (const sp of m.speed || []) {
@@ -798,6 +800,7 @@ function drawTimeline() {
   drawHoldsRow(ctx, W, P);
   drawEventsRow(ctx, W, P);
   drawTrimAndTail(ctx, W, P);
+  drawCuts(ctx, W, P);
   ctx.restore();
   drawTrimHandles(ctx, P);
   drawPlayhead(ctx, P);
@@ -1038,6 +1041,19 @@ function drawHiddenCursorGlyph(ctx, P, x, y) {
     ctx.beginPath(); ctx.moveTo(4, 1); ctx.lineTo(21, 22); ctx.stroke();
   }
   ctx.restore();
+}
+
+function drawCuts(ctx, W, P) {
+  const m = state.meta;
+  for (const r of m.cuts || []) {
+    const a = tlX(state.eStarts[clamp(r.from, 0, m.frames.length - 1)]);
+    const b = tlX(r.to >= m.frames.length ? state.eTotal : state.eStarts[r.to]);
+    if (b < 0 || a > W) continue;
+    ctx.fillStyle = withAlpha(P.base, 0.6);
+    ctx.fillRect(a, TL.RUL, b - a, laneBot() - TL.RUL);
+    ctx.fillStyle = hatchFor(ctx);
+    ctx.fillRect(a, TL.RUL, b - a, laneBot() - TL.RUL);
+  }
 }
 
 function drawTrimAndTail(ctx, W, P) {
@@ -1584,6 +1600,16 @@ export function buildContextMenu(ev) {
       onClick: () => splitCamAtPlayhead(b),
     });
     items.push({
+      label: "Cut this section from the video",
+      icon: "lucide-eraser",
+      onClick: () => applyEdit(() => {
+        m.cuts = m.cuts || [];
+        m.cuts.push({ from: b.i0, to: b.i1 + 1 });
+        select(null);
+        metaEdited();
+      }),
+    });
+    items.push({
       label: "Merge into previous",
       icon: "lucide-merge",
       disabled: bi <= 0,
@@ -1652,6 +1678,15 @@ export function buildContextMenu(ev) {
         { label: "0.5× (slow motion)", onClick: mkSpeed(0.5) },
       ],
     });
+    items.push({
+      label: "Cut this section from the video",
+      icon: "lucide-eraser",
+      onClick: () => applyEdit(() => {
+        m.cuts = m.cuts || [];
+        m.cuts.push({ from: a, to: b });
+        metaEdited();
+      }),
+    });
   } else if (hit.mode === "clickdrag") {
     select({ type: "click", idx: hit.idx });
     items.push({ label: "Delete click pulse", icon: "lucide-trash-2", onClick: () => applyEdit(() => { m.clicks.splice(hit.idx, 1); select(null); metaEdited(); }) });
@@ -1711,6 +1746,19 @@ export function buildContextMenu(ev) {
         const v = await prompt({ title: "Add caption", label: "Text", type: "text", value: "" });
         if (v !== null && v !== "") addCaptionAt(entry, v);
       },
+    });
+  }
+
+  const cutIdx = (m.cuts || []).findIndex((r) => entry >= r.from && entry < r.to);
+  if (cutIdx >= 0) {
+    items.unshift({
+      label: "Restore cut section",
+      icon: "lucide-undo-2",
+      onClick: () => applyEdit(() => {
+        m.cuts.splice(cutIdx, 1);
+        if (!m.cuts.length) delete m.cuts;
+        metaEdited();
+      }),
     });
   }
 
