@@ -15,7 +15,7 @@ The /api/import endpoints receive a real-time tab recording from the browser
 extension (extension/): a JSON manifest (page size, t0, input events), then the
 raw webm; ingest.py converts it into a normal segment that appears in the rail.
 """
-import base64, json, math, os, re, shutil, subprocess, sys, threading, time
+import base64, importlib, json, math, os, re, shutil, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 EDITOR_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -121,6 +121,12 @@ class RenderJob:
             self.log(f"ERROR: {e}")
 
     def render_segment(self, name, path):
+        # detached servers run for days; without this they resolve renders with
+        # whatever resolve.py said when they booted
+        global needs_resolve, resolve_meta
+        import resolve as resolve_mod
+        importlib.reload(resolve_mod)
+        needs_resolve, resolve_meta = resolve_mod.needs_resolve, resolve_mod.resolve_meta
         slot = self.seg_slot(name)
         env = dict(os.environ)
         edited = os.path.join(path, "meta.edited.json")
