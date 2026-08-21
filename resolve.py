@@ -79,6 +79,10 @@ def resolve_meta(m):
     for c in m.get("captions") or []:      # baked per entry; later regions win
         for i in range(max(0, int(c["from"])), min(len(frames), int(c["to"]))):
             frames[i]["cap"] = c["text"]
+            if c.get("pos") == "top":
+                frames[i]["capTop"] = True
+            else:
+                frames[i].pop("capTop", None)
     out = {"dsf": m["dsf"], "fps": m.get("fps", 60), "clip": m["clip"], "frames": frames}
     for key in ("clicks", "keys"):
         evts = []

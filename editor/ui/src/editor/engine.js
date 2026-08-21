@@ -47,6 +47,8 @@ export const SIMPLE = [
     match: (k, v) => (v[0] === 0) === (k.KEY_N === 0) },
   { id: "keysize", label: "Hint size", card: "cursor", keys: ["KEY_H"], visual: true,
     opts: [["S", [36]], ["M", [46]], ["L", [58]]] },
+  { id: "capsize", label: "Caption size", card: "cursor", keys: ["CAP_H"], visual: true,
+    opts: [["S", [36]], ["M", [46]], ["L", [58]]] },
   { id: "quality", label: "Quality", card: "export", keys: ["CRF"],
     opts: [["Good", [20]], ["High", [18]]] },
   { id: "res", label: "Resolution", card: "export", keys: ["PANEL_SCALE"], visual: true,
@@ -229,7 +231,8 @@ export function resolveMeta(m) {
     for (let i = Math.max(0, r.from); i < Math.min(frames.length, r.to); i++) hideCur[i] = 1;
   const capText = new Array(frames.length).fill(null); // later regions win, like resolve.py
   for (const c of m.captions || [])
-    for (let i = Math.max(0, c.from); i < Math.min(frames.length, c.to); i++) capText[i] = c.text;
+    for (let i = Math.max(0, c.from); i < Math.min(frames.length, c.to); i++)
+      capText[i] = { text: c.text, top: c.pos === "top" };
   return { frames, reps, kept, hideCur, capText, clicks: remap(m.clicks), keys: remap(m.keys) };
 }
 
@@ -503,11 +506,13 @@ function drawCaptionHud(ctx, pf, g, K) {
   const k = state.knobs, capText = state.res.capText;
   if (!capText || k.CAP_H === 0) return 0;
   const e = state.path.srcEntry[clamp(Math.round(pf), 0, state.path.total - 1)];
-  const text = capText[e];
-  if (!text) return 0;
+  const cap = capText[e];
+  if (!cap) return 0;
+  const { text, top } = cap;
+  const same = (c) => c && c.text === text && c.top === top;
   let i0 = e, i1 = e;
-  while (i0 > 0 && capText[i0 - 1] === text) i0--;
-  while (i1 < capText.length - 1 && capText[i1 + 1] === text) i1++;
+  while (i0 > 0 && same(capText[i0 - 1])) i0--;
+  while (i1 < capText.length - 1 && same(capText[i1 + 1])) i1++;
   let startPf = -1;
   for (let i = i0; i <= i1 && startPf < 0; i++) startPf = state.path.starts[i];
   let endPf = state.path.total;
@@ -534,9 +539,10 @@ function drawCaptionHud(ctx, pf, g, K) {
   const tw = Math.max(...lines.map((l) => ctx.measureText(l).width));
   const padX = lh * 0.55, padY = lh * 0.24, gap = lh * 0.08;
   const w = tw + 2 * padX, h = lines.length * lh + (lines.length - 1) * gap + 2 * padY;
-  const rise = (1 - Math.min(1, age / 9)) * 10 * g.PS * K;
+  const slide = (1 - Math.min(1, age / 9)) * 10 * g.PS * K;
   const x = (g.BW * K - w) / 2;
-  const y = g.BH * K - k.KEY_INSET * g.PS * K - h + rise;
+  const y = top ? k.KEY_INSET * g.PS * K - slide
+              : g.BH * K - k.KEY_INSET * g.PS * K - h + slide;
   ctx.shadowColor = "rgba(15,23,42,0.55)";
   ctx.shadowBlur = lh * 0.3; ctx.shadowOffsetY = lh * 0.1;
   ctx.fillStyle = "rgba(15,23,42,0.92)";
@@ -547,7 +553,7 @@ function drawCaptionHud(ctx, pf, g, K) {
   lines.forEach((l, i) =>
     ctx.fillText(l, g.BW * K / 2, y + padY + i * (lh + gap) + lh / 2 + lh * 0.02));
   ctx.restore();
-  return h;
+  return top ? 0 : h; // keycaps only lift past a bottom caption
 }
 
 function drawKeyHud(ctx, pf, g, K, lift = 0) {
@@ -1561,7 +1567,7 @@ export function buildContextMenu(ev) {
           onClick: () => applyEdit(() => setStillRepeat(e, Math.round(s * fps))),
         })),
         {
-          label: "Custom…",
+          label: "Custom",
           onClick: async () => {
             const v = await prompt({ title: "Custom hold", label: "Seconds", type: "number", value: +((m.frames[e].repeat ?? 1) / fps).toFixed(1) });
             if (v !== null && isFinite(parseFloat(v))) applyEdit(() => setStillRepeat(e, parseFloat(v) * fps));
@@ -1575,7 +1581,7 @@ export function buildContextMenu(ev) {
     const idx = hit.idx;
     select({ type: "speed", idx });
     items.push({
-      label: "Edit speed…",
+      label: "Edit speed",
       icon: "lucide-gauge",
       onClick: async () => {
         const v = await prompt({ title: "Section speed", label: "Speed (2 = twice as fast)", type: "number", value: m.speed[idx].mult });
@@ -1611,18 +1617,31 @@ export function buildContextMenu(ev) {
   } else if (hit.mode === "capdrag" || hit.mode === "capedgeL" || hit.mode === "capedgeR") {
     select({ type: "caption", idx: hit.idx });
     items.push({
-      label: "Edit caption…",
+      label: "Edit caption",
       icon: "lucide-pencil",
       onClick: async () => {
         const v = await prompt({ title: "Caption", label: "Text", type: "text", value: m.captions[hit.idx].text });
         if (v !== null && v !== "") applyEdit(() => { m.captions[hit.idx].text = v; metaEdited(); });
       },
     });
+    const setPos = (pos) => () => applyEdit(() => {
+      if (pos === "top") m.captions[hit.idx].pos = "top";
+      else delete m.captions[hit.idx].pos;
+      metaEdited();
+    });
+    items.push({
+      label: "Position",
+      icon: "lucide-arrow-up-down",
+      submenu: [
+        { label: `Bottom${m.captions[hit.idx].pos !== "top" ? " ✓" : ""}`, onClick: setPos("bottom") },
+        { label: `Top${m.captions[hit.idx].pos === "top" ? " ✓" : ""}`, onClick: setPos("top") },
+      ],
+    });
     items.push({ label: "Delete caption", icon: "lucide-trash-2", onClick: () => applyEdit(() => { m.captions.splice(hit.idx, 1); select(null); metaEdited(); }) });
   } else if (hit.mode === "keydrag") {
     select({ type: "key", idx: hit.idx });
     items.push({
-      label: "Edit text…",
+      label: "Edit text",
       icon: "lucide-pencil",
       onClick: async () => {
         const v = await prompt({ title: "Keycap hint", label: "Text (e.g. ⌘+Enter)", type: "text", value: m.keys[hit.idx].text });
@@ -1633,7 +1652,7 @@ export function buildContextMenu(ev) {
   } else if (y >= TL.EVT[0] && y <= TL.EVT[0] + TL.EVT[1]) {
     items.push({ label: "Add click pulse at this time", icon: "lucide-mouse-pointer-click", onClick: () => addClickAt(entry) });
     items.push({
-      label: "Add keycap at this time…",
+      label: "Add keycap at this time",
       icon: "lucide-keyboard",
       onClick: async () => {
         const v = await prompt({ title: "Add keycap hint", label: "Text (e.g. ⌘+Enter)", type: "text", value: "⌘+Enter" });
@@ -1641,7 +1660,7 @@ export function buildContextMenu(ev) {
       },
     });
     items.push({
-      label: "Add caption at this time…",
+      label: "Add caption at this time",
       icon: "lucide-captions",
       onClick: async () => {
         const v = await prompt({ title: "Add caption", label: "Text", type: "text", value: "" });

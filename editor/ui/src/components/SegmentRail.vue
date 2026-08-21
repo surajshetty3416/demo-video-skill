@@ -55,8 +55,8 @@ const dragFrom = ref(null);
 const dragOver = ref(null);
 
 const entryMenu = (name) => [
-  { label: "Rename…", icon: "lucide-pencil", onClick: () => engine.renameSegment(name) },
-  { label: "Delete…", icon: "lucide-trash-2", onClick: () => engine.deleteSegment(name) },
+  { label: "Rename", icon: "lucide-pencil", onClick: () => engine.renameSegment(name) },
+  { label: "Delete", icon: "lucide-trash-2", onClick: () => engine.deleteSegment(name) },
 ];
 
 function drop(target) {

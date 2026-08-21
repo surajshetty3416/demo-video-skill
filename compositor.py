@@ -257,13 +257,14 @@ def cap_sprite(text):
     return sp
 
 def draw_caption(img, cap):
-    text, a, rise_t = cap
+    text, a, rise_t, top = cap
     if a <= 0: return 0
     sp = cap_sprite(text)
     if a < 1: sp = sp.copy(); sp.putalpha(sp.getchannel("A").point(lambda v: round(v*a)))
-    rise = round((1-rise_t)*10*PANEL_SCALE)
-    img.paste(sp, ((BG_W-sp.width)//2, BG_H-KEY_INSET*PANEL_SCALE-sp.height+rise), sp)
-    return sp.height
+    slide = round((1-rise_t)*10*PANEL_SCALE)
+    y = KEY_INSET*PANEL_SCALE - slide if top else BG_H-KEY_INSET*PANEL_SCALE-sp.height+slide
+    img.paste(sp, ((BG_W-sp.width)//2, y), sp)
+    return 0 if top else sp.height    # keycaps only need lifting past a bottom caption
 
 def clamp(v,a,b): return a if v<a else b if v>b else v
 def focus_px(fr): return (fr["cx"]-clip["x"])*dsf, (fr["cy"]-clip["y"])*dsf
@@ -321,15 +322,16 @@ def main():
         expanded += [(i, fr)] * fr.get("repeat", 1)
     expanded += [(len(frames)-1, frames[-1])] * END_EXTRA
 
-    # captions come baked per entry ("cap"); fade each contiguous run in/out
+    # captions come baked per entry ("cap"/"capTop"); fade each run in/out
+    cap_of = lambda fr: (fr.get("cap"), bool(fr.get("capTop")))
     cap_state, q = [None] * len(expanded), 0
     while q < len(expanded):
-        text, j = expanded[q][1].get("cap"), q
-        while j < len(expanded) and expanded[j][1].get("cap") == text: j += 1
+        (text, top), j = cap_of(expanded[q][1]), q
+        while j < len(expanded) and cap_of(expanded[j][1]) == (text, top): j += 1
         if text:
             for p in range(q, j):
                 a = min(1.0, (p-q)/8) * min(1.0, (j-p)/8)
-                cap_state[p] = (text, round(a, 3), round(min(1.0, (p-q)/9), 3))
+                cap_state[p] = (text, round(a, 3), round(min(1.0, (p-q)/9), 3), top)
         q = j
 
     by_entry, keys_by_entry = {}, {}
