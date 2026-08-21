@@ -59,7 +59,7 @@ async function render() {
   } else {
     show(true, false, false);
     $("rec").disabled = !serverOk;
-    status(serverOk ? "" : `Server not running at ${server.replace(/^https?:\/\//, "")}`, true);
+    status(serverOk ? "Record" : `Server not running at ${server.replace(/^https?:\/\//, "")}`, !serverOk);
   }
 }
 
