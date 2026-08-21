@@ -240,6 +240,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.delete_segment(parts[2])
             if path == "/api/render": return self.render(body)
             if path == "/api/import": return self.import_start(body)
+            if len(parts) == 4 and parts[:2] == ["api", "output"] and parts[3] == "reveal":
+                return self.reveal_output(parts[2])
             if len(parts) == 4 and parts[:2] == ["api", "import"]:
                 imp = self.imports.get(parts[2])
                 if not imp: return self.send(404, {"error": "unknown import"})
@@ -436,12 +438,24 @@ class Handler(BaseHTTPRequestHandler):
                 if kv.startswith("since="): since = int(kv[6:] or 0)
         self.send(200, self.job.snapshot(since))
 
-    def serve_video(self, name):
+    def output_path(self, name):
         if name == "__full__":
-            fpath = os.path.join(self.workdir, "edited-full.mp4")
+            return os.path.join(self.workdir, "edited-full.mp4")
+        seg = self.segpath(name)
+        return seg and os.path.join(seg, "demo.mp4")
+
+    def reveal_output(self, name):
+        fpath = self.output_path(name)
+        if not fpath or not os.path.exists(fpath):
+            return self.send(404, {"error": "no rendered video"})
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", fpath])
         else:
-            seg = self.segpath(name)
-            fpath = seg and os.path.join(seg, "demo.mp4")
+            subprocess.Popen(["xdg-open", os.path.dirname(fpath)])
+        self.send(200, {"ok": True})
+
+    def serve_video(self, name):
+        fpath = self.output_path(name)
         if not fpath or not os.path.exists(fpath):
             return self.send(404, {"error": "no rendered video"})
         size = os.path.getsize(fpath)

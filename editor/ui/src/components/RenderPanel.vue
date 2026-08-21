@@ -47,6 +47,7 @@
             <span class="text-xs text-ink-gray-8">{{ disp(o.label) }}</span>
             <div class="flex items-center gap-2">
               <span class="text-xs tabular-nums text-ink-gray-5">{{ fmtSize(o.bytes) }}</span>
+              <Button size="sm" variant="ghost" :icon="IconFolder" label="Open folder" @click="reveal(o.url)" />
               <Button size="sm" label="Open" @click="open(o.url)" />
             </div>
           </div>
@@ -80,6 +81,7 @@ import IconCheck from "~icons/lucide/check";
 import IconLoader from "~icons/lucide/loader-2";
 import IconAlert from "~icons/lucide/alert-circle";
 import IconChevron from "~icons/lucide/chevron-right";
+import IconFolder from "~icons/lucide/folder-open";
 import { segLabel, ui } from "../editor/engine.js";
 
 // server rows carry segment dir names; show the user label when one exists
@@ -104,6 +106,9 @@ function fmtSize(b) {
 }
 function open(url) {
   window.open(url, "_blank");
+}
+function reveal(url) {
+  fetch(`/api/output/${url.split("/")[2]}/reveal`, { method: "POST" });
 }
 
 watch(
