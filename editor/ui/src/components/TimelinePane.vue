@@ -23,10 +23,18 @@
       <div
         v-for="t in gutterRows"
         :key="t.label"
-        class="absolute left-0 flex w-full items-center px-3 text-xs text-ink-gray-6"
+        class="absolute left-0 flex w-full items-center justify-between px-3 text-xs text-ink-gray-6"
         :style="{ top: t.top + 'px', height: t.h + 'px' }"
       >
         {{ t.label }}
+        <button
+          v-if="t.label === 'Events'"
+          class="flex h-4.5 w-4.5 items-center justify-center rounded text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-8"
+          title="Add caption at playhead"
+          @click="engine.addCaptionAtPlayhead()"
+        >
+          <IconPlus class="h-3.5 w-3.5" />
+        </button>
       </div>
     </div>
     <ContextMenu :options="ui.ctxOptions">
@@ -53,6 +61,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { Button, ContextMenu } from "frappe-ui";
 import IconPlay from "~icons/lucide/play";
 import IconPause from "~icons/lucide/pause";
+import IconPlus from "~icons/lucide/plus";
 import * as engine from "../editor/engine.js";
 import { TL, TL_TRACKS, TL_MIN_H, TL_MAX_H, ui } from "../editor/engine.js";
 

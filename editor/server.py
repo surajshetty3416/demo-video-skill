@@ -15,7 +15,7 @@ The /api/import endpoints receive a real-time tab recording from the browser
 extension (extension/): a JSON manifest (page size, t0, input events), then the
 raw webm; ingest.py converts it into a normal segment that appears in the rail.
 """
-import base64, json, math, os, re, subprocess, sys, threading, time
+import base64, json, math, os, re, shutil, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 EDITOR_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -223,11 +223,14 @@ class Handler(BaseHTTPRequestHandler):
             parts = path.strip("/").split("/")
             if len(parts) == 4 and parts[:2] == ["api", "import"] and parts[3] == "video":
                 return self.import_video(parts[2])   # raw webm body, not JSON
-            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or b"{}"))
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
             if len(parts) == 4 and parts[:2] == ["api", "segment"] and parts[3] == "save":
                 seg = self.segpath(parts[2])
                 if not seg: return self.send(404, {"error": "unknown segment"})
                 return self.save(seg, body)
+            if len(parts) == 4 and parts[:2] == ["api", "segment"] and parts[3] == "delete":
+                return self.delete_segment(parts[2])
             if path == "/api/render": return self.render(body)
             if path == "/api/import": return self.import_start(body)
             if len(parts) == 4 and parts[:2] == ["api", "import"]:
@@ -285,6 +288,14 @@ class Handler(BaseHTTPRequestHandler):
         ctype = "image/jpeg" if p.endswith(".jpg") else "image/png"
         with open(p, "rb") as f:
             self.send(200, f.read(), ctype, cache=True)
+
+    def delete_segment(self, name):
+        seg = self.segpath(name)
+        if not seg: return self.send(404, {"error": "unknown segment"})
+        if os.path.abspath(seg) == os.path.abspath(self.workdir):
+            return self.send(400, {"error": "refusing to delete the workdir itself"})
+        shutil.rmtree(seg)
+        self.send(200, {"ok": True})
 
     def save(self, seg, body):
         meta, knobs = body.get("meta"), body.get("knobs")

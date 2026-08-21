@@ -258,7 +258,8 @@ cursor) is hardcoded, since it must match the rendered mp4.
 Screen-Studio-style UI: segment rail (thumbnail + name + duration, drag-to-reorder =
 concat order; double-click the name or right-click → Rename to give a segment a display
 label, stored as `label` in the edited meta and shown in the rail, top bar, and render
-output rows — the directory name stays the id in every API), live preview canvas that
+output rows — the directory name stays the id in every API; right-click → Delete removes
+the segment dir from disk after a confirmation), live preview canvas that
 replicates the compositor exactly (gradient,
 rounded window + shadow, EMA camera, cursor, pulses, keycaps), and one integrated
 timeline: a transport cluster (play/pause + current/total time) and Camera / Holds /
@@ -274,7 +275,8 @@ width (drag across live frames, stored as `speed:[{from,to,mult}]`), draggable c
 dots / keycap chips, caption regions on the Events lane (stored as
 `captions:[{from,to,text}]`, rendered as a rounded ink bar with wrapped text at the
 bottom of the frame that fades in/out; drag the band to move it, drag its edges to
-retime, right-click to add/edit/delete), and trim handles. Speed changes ease in and out instead of jumping
+retime, right-click to add/edit/delete, or the + button on the Events gutter to add
+one at the playhead), and trim handles. Speed changes ease in and out instead of jumping
 at region boundaries: multipliers are smoothed in log space with a raised-cosine kernel
 spanning `speedRamp` seconds (saved in the edited meta, default 0.6, 0 = hard cuts,
 editable in Advanced), identically in the server resolver and the JS preview so the

@@ -1417,6 +1417,11 @@ export function addKeyAt(entry, text) {
     metaEdited();
   });
 }
+export async function addCaptionAtPlayhead() {
+  if (!state.meta) return;
+  const v = await prompt({ title: "Add caption", label: "Text", type: "text", value: "" });
+  if (v !== null && v !== "") addCaptionAt(playheadEntry(), v);
+}
 export function addCaptionAt(entry, text) {
   const m = state.meta, fps = m.fps || 60;
   applyEdit(() => {
@@ -1734,6 +1739,31 @@ export function segLabel(name) {
   if (st) return st.meta.label || name;
   const info = ui.segments.find((s) => s.name === name);
   return info?.label || name;
+}
+
+export async function deleteSegment(name) {
+  const v = await prompt({
+    title: "Delete take", confirm: true, danger: true, okLabel: "Delete",
+    message: `Delete "${segLabel(name)}" permanently? Its captured frames, edits and renders are removed from disk.`,
+  });
+  if (v === null) return;
+  const r = await fetch(`/api/segment/${encodeURIComponent(name)}/delete`, { method: "POST" });
+  if (!r.ok) return;
+  state.segStates.delete(name);
+  ui.segments = ui.segments.filter((s) => s.name !== name);
+  ui.order = ui.order.filter((n) => n !== name);
+  if (ui.seg === name) {
+    stopPlayback();
+    ui.seg = null;
+    ui.sel = null;
+    if (ui.order.length) await loadSegment(ui.order[0]);
+    else {
+      state.meta = null;
+      clearCache();
+      for (const c of [cvs.preview, cvs.timeline])
+        if (c) c.getContext("2d").clearRect(0, 0, c.width, c.height);
+    }
+  }
 }
 
 export async function renameSegment(name) {
