@@ -1796,6 +1796,8 @@ export async function loadSegment(name) {
     };
     meta.speed = meta.speed || [];
     meta.captions = meta.captions || [];
+    if (meta.cut && !meta.cuts) meta.cuts = meta.cut;   // pre-rename saves
+    delete meta.cut;
     meta.trim = meta.trim || { in: 0, out: meta.frames.length - 1 };
     meta.speedRamp = meta.speedRamp ?? RAMP_DEFAULT;
     st = {

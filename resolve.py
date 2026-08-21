@@ -40,7 +40,8 @@ def resolve_meta(m):
     for i in range(n):
         if i < tin or i > min(tout, n - 1):
             reps[i] = 0
-    for r in m.get("cuts") or []:           # interior section deletions
+    # interior section deletions ("cut" is the legacy spelling of the key)
+    for r in (m.get("cuts") or m.get("cut")) or []:
         for i in range(max(0, int(r["from"])), min(n, int(r["to"]))):
             reps[i] = 0
     pace = float(m.get("pace") or 1)
@@ -105,5 +106,6 @@ def resolve_meta(m):
 
 
 def needs_resolve(m):
-    return bool(m.get("speed") or m.get("trim") or m.get("cuts") or m.get("cursorHide")
-                or m.get("captions") or (m.get("pace") and float(m["pace"]) != 1))
+    return bool(m.get("speed") or m.get("trim") or m.get("cuts") or m.get("cut")
+                or m.get("cursorHide") or m.get("captions")
+                or (m.get("pace") and float(m["pace"]) != 1))
