@@ -16,7 +16,7 @@ export const KNOB_DEFAULTS = {
   ZOOM_EMA: 0.11, PAN_EMA: 0.13, END_EXTRA: 95,
   GRAD: [[0,[238,242,255]],[0.5,[237,233,254]],[1,[250,232,255]]],
   SHADOW_ALPHA: 120, SHADOW_BLUR: 34, CURSOR_CSS_H: 34, PULSE_N: 18,
-  KEY_H: 46, KEY_INSET: 34, KEY_N: 58, CRF: 18,
+  KEY_H: 46, KEY_INSET: 34, KEY_N: 58, CAP_H: 46, CRF: 18,
 };
 
 export const BG_PRESETS = [
@@ -163,7 +163,8 @@ function validateSel() {
     (sel.type === "still" && !(sel.entry < m.frames.length && (m.frames[sel.entry].repeat ?? 1) > 1)) ||
     (sel.type === "speed" && !(m.speed || [])[sel.idx]) ||
     (sel.type === "click" && !(m.clicks || [])[sel.idx]) ||
-    (sel.type === "key" && !(m.keys || [])[sel.idx]);
+    (sel.type === "key" && !(m.keys || [])[sel.idx]) ||
+    (sel.type === "caption" && !(m.captions || [])[sel.idx]);
   if (bad) ui.sel = null;
 }
 
@@ -226,7 +227,10 @@ export function resolveMeta(m) {
   const hideCur = new Uint8Array(frames.length);
   for (const r of m.cursorHide || [])
     for (let i = Math.max(0, r.from); i < Math.min(frames.length, r.to); i++) hideCur[i] = 1;
-  return { frames, reps, kept, hideCur, clicks: remap(m.clicks), keys: remap(m.keys) };
+  const capText = new Array(frames.length).fill(null); // later regions win, like resolve.py
+  for (const c of m.captions || [])
+    for (let i = Math.max(0, c.from); i < Math.min(frames.length, c.to); i++) capText[i] = c.text;
+  return { frames, reps, kept, hideCur, capText, clicks: remap(m.clicks), keys: remap(m.keys) };
 }
 
 export function rebuild() {
@@ -488,11 +492,65 @@ function drawPreview() {
   }
   ctx.restore();
 
-  drawKeyHud(ctx, pf, g, K);
+  const capH = drawCaptionHud(ctx, pf, g, K);
+  drawKeyHud(ctx, pf, g, K, capH ? capH + 10 * g.PS * K : 0);
   updateTransport(pf);
 }
 
-function drawKeyHud(ctx, pf, g, K) {
+// mirrors compositor.py cap_sprite/draw_caption: rounded ink bar, wrapped
+// centered text, fade in/out over the caption run, slight rise on entry
+function drawCaptionHud(ctx, pf, g, K) {
+  const k = state.knobs, capText = state.res.capText;
+  if (!capText || k.CAP_H === 0) return 0;
+  const e = state.path.srcEntry[clamp(Math.round(pf), 0, state.path.total - 1)];
+  const text = capText[e];
+  if (!text) return 0;
+  let i0 = e, i1 = e;
+  while (i0 > 0 && capText[i0 - 1] === text) i0--;
+  while (i1 < capText.length - 1 && capText[i1 + 1] === text) i1++;
+  let startPf = -1;
+  for (let i = i0; i <= i1 && startPf < 0; i++) startPf = state.path.starts[i];
+  let endPf = state.path.total;
+  for (let j = i1 + 1; j < capText.length; j++)
+    if (state.path.starts[j] >= 0) { endPf = state.path.starts[j]; break; }
+  if (startPf < 0) return 0;
+  const age = pf - startPf, remain = endPf - pf;
+  const a = Math.min(1, age / 8) * Math.min(1, remain / 8);
+  if (a <= 0) return 0;
+  const lh = Math.round(k.CAP_H * g.PS) * K;
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.font = `600 ${lh * 0.5}px -apple-system, "SF Pro Text", sans-serif`;
+  ctx.textBaseline = "middle"; ctx.textAlign = "center";
+  const maxw = g.BW * K * 0.72;
+  const lines = [];
+  let cur = "";
+  for (const word of text.split(/\s+/)) {
+    const t = (cur + " " + word).trim();
+    if (cur && ctx.measureText(t).width > maxw) { lines.push(cur); cur = word; }
+    else cur = t;
+  }
+  if (cur) lines.push(cur);
+  const tw = Math.max(...lines.map((l) => ctx.measureText(l).width));
+  const padX = lh * 0.55, padY = lh * 0.24, gap = lh * 0.08;
+  const w = tw + 2 * padX, h = lines.length * lh + (lines.length - 1) * gap + 2 * padY;
+  const rise = (1 - Math.min(1, age / 9)) * 10 * g.PS * K;
+  const x = (g.BW * K - w) / 2;
+  const y = g.BH * K - k.KEY_INSET * g.PS * K - h + rise;
+  ctx.shadowColor = "rgba(15,23,42,0.55)";
+  ctx.shadowBlur = lh * 0.3; ctx.shadowOffsetY = lh * 0.1;
+  ctx.fillStyle = "rgba(15,23,42,0.92)";
+  roundRect(ctx, x, y, w, h, lh * 0.42);
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+  ctx.fillStyle = "#fff";
+  lines.forEach((l, i) =>
+    ctx.fillText(l, g.BW * K / 2, y + padY + i * (lh + gap) + lh / 2 + lh * 0.02));
+  ctx.restore();
+  return h;
+}
+
+function drawKeyHud(ctx, pf, g, K, lift = 0) {
   const k = state.knobs;
   let best = null;
   for (const ke of state.res.keys) {
@@ -517,7 +575,7 @@ function drawKeyHud(ctx, pf, g, K) {
   const totalW = ws.reduce((x, y) => x + y, 0) + gap * (caps.length - 1);
   const rise = (1 - Math.min(1, best.age / 9)) * 12 * g.PS * K;
   let x = (g.BW * K - totalW) / 2;
-  const y = g.BH * K - k.KEY_INSET * g.PS * K - h + rise;
+  const y = g.BH * K - k.KEY_INSET * g.PS * K - h + rise - lift;
   ctx.shadowColor = "rgba(15,23,42,0.55)";
   ctx.shadowBlur = h * 0.3; ctx.shadowOffsetY = h * 0.1;
   for (let i = 0; i < caps.length; i++) {
@@ -884,6 +942,26 @@ function drawEventsRow(ctx, W, P) {
   const evy = TL.EVT[0] + TL.EVT[1] / 2;
   const entryX = (e) =>
     tlX(e >= m.frames.length ? state.eTotal : state.eStarts[clamp(e, 0, m.frames.length - 1)]);
+  for (let ci = 0; ci < (m.captions || []).length; ci++) {
+    const cp = m.captions[ci];
+    const a = entryX(cp.from), b2 = entryX(cp.to);
+    if (b2 < 0 || a > W) continue;
+    const selHere = sel && sel.type === "caption" && sel.idx === ci;
+    const bw = Math.max(b2 - a, 14);
+    chipRect(ctx, a, evy - 8, bw, 16);
+    ctx.fillStyle = withAlpha(P.ink5, selHere ? 0.28 : 0.14);
+    ctx.fill();
+    ctx.strokeStyle = selHere ? P.ink : withAlpha(P.ink5, 0.55);
+    ctx.lineWidth = selHere ? 1.5 : 1;
+    ctx.stroke();
+    ctx.save();
+    ctx.beginPath(); ctx.rect(a + 4, evy - 8, bw - 8, 16); ctx.clip();
+    ctx.font = tlFont(11, 500);
+    ctx.textBaseline = "middle"; ctx.textAlign = "left";
+    ctx.fillStyle = P.ink7;
+    ctx.fillText(`“${cp.text}”`, a + 6, evy + 0.5);
+    ctx.restore();
+  }
   ctx.save();
   ctx.strokeStyle = withAlpha(P.ink5, 0.35);
   ctx.setLineDash([2, 3]);
@@ -981,7 +1059,8 @@ function drawPlayhead(ctx, P) {
 
 /* ---------- timeline interaction ---------- */
 let drag = null;
-const MUTATING_MODES = new Set(["trimin", "trimout", "camedge", "stillresize", "clickdrag", "keydrag", "speedsel"]);
+const MUTATING_MODES = new Set(["trimin", "trimout", "camedge", "stillresize", "clickdrag",
+                                "keydrag", "speedsel", "capdrag", "capedgeL", "capedgeR"]);
 function tlHit(x, y) {
   const m = state.meta;
   const inRow = (row) => y >= row[0] && y <= row[0] + row[1];
@@ -1029,6 +1108,17 @@ function tlHit(x, y) {
     for (let ci = (m.clicks || []).length - 1; ci >= 0; ci--) {
       const cx = tlX(state.eStarts[clamp(m.clicks[ci].i, 0, m.frames.length - 1)]);
       if (Math.hypot(x - cx, y - evy) < 8) return { mode: "clickdrag", idx: ci };
+    }
+    const capX = (e) =>
+      tlX(e >= m.frames.length ? state.eTotal : state.eStarts[clamp(e, 0, m.frames.length - 1)]);
+    for (let ci = (m.captions || []).length - 1; ci >= 0; ci--) {
+      const cp = m.captions[ci];
+      const a = capX(cp.from), b2 = capX(cp.to);
+      if (Math.abs(y - evy) > 10) continue;
+      if (Math.abs(x - a) < 5) return { mode: "capedgeL", idx: ci };
+      if (Math.abs(x - b2) < 5) return { mode: "capedgeR", idx: ci };
+      if (x >= a && x <= b2)
+        return { mode: "capdrag", idx: ci, e0: entryAtPf(tlPf(x)), from0: cp.from, to0: cp.to };
     }
     return { mode: "scrub" };
   }
@@ -1078,6 +1168,23 @@ export function tlPointerMove(ev) {
     case "speedsel": drag.b = en(); schedule("timeline"); break;
     case "clickdrag": if (drag.moved) { m.clicks[drag.idx].i = en(); metaEdited(); } break;
     case "keydrag": if (drag.moved) { m.keys[drag.idx].i = en(); metaEdited(); } break;
+    case "capdrag": {
+      if (!drag.moved) break;
+      const cp = m.captions[drag.idx], len = drag.to0 - drag.from0;
+      cp.from = clamp(drag.from0 + en() - drag.e0, 0, m.frames.length - len);
+      cp.to = cp.from + len;
+      metaEdited(); break;
+    }
+    case "capedgeL": {
+      const cp = m.captions[drag.idx];
+      cp.from = clamp(en(), 0, cp.to - 1);
+      metaEdited(); break;
+    }
+    case "capedgeR": {
+      const cp = m.captions[drag.idx];
+      cp.to = clamp(en() + 1, cp.from + 1, m.frames.length);
+      metaEdited(); break;
+    }
   }
 }
 export function tlPointerUp() {
@@ -1089,6 +1196,7 @@ export function tlPointerUp() {
     case "speedsel-existing": select({ type: "speed", idx: drag.idx }); break;
     case "clickdrag": select({ type: "click", idx: drag.idx }); break;
     case "keydrag": select({ type: "key", idx: drag.idx }); break;
+    case "capdrag": case "capedgeL": case "capedgeR": select({ type: "caption", idx: drag.idx }); break;
     case "speedsel": {
       const a = Math.min(drag.a, drag.b), b = Math.max(drag.a, drag.b);
       if (drag.moved && b - a >= 1) {
@@ -1285,6 +1393,7 @@ export function deleteSelected() {
     if (sel.type === "speed") m.speed.splice(sel.idx, 1);
     else if (sel.type === "click") m.clicks.splice(sel.idx, 1);
     else if (sel.type === "key") m.keys.splice(sel.idx, 1);
+    else if (sel.type === "caption") m.captions.splice(sel.idx, 1);
     else return;
     select(null);
     metaEdited();
@@ -1305,6 +1414,19 @@ export function addKeyAt(entry, text) {
     m.keys = m.keys || [];
     m.keys.push({ i: entry, text });
     select({ type: "key", idx: m.keys.length - 1 });
+    metaEdited();
+  });
+}
+export function addCaptionAt(entry, text) {
+  const m = state.meta, fps = m.fps || 60;
+  applyEdit(() => {
+    m.captions = m.captions || [];
+    let to = entry;
+    const target = state.eStarts[entry] + 2.5 * fps; // default span ~2.5s
+    while (to < m.frames.length - 1
+           && (state.eStarts[to + 1] < 0 || state.eStarts[to + 1] < target)) to++;
+    m.captions.push({ from: entry, to: to + 1, text });
+    select({ type: "caption", idx: m.captions.length - 1 });
     metaEdited();
   });
 }
@@ -1481,6 +1603,17 @@ export function buildContextMenu(ev) {
   } else if (hit.mode === "clickdrag") {
     select({ type: "click", idx: hit.idx });
     items.push({ label: "Delete click pulse", icon: "lucide-trash-2", onClick: () => applyEdit(() => { m.clicks.splice(hit.idx, 1); select(null); metaEdited(); }) });
+  } else if (hit.mode === "capdrag" || hit.mode === "capedgeL" || hit.mode === "capedgeR") {
+    select({ type: "caption", idx: hit.idx });
+    items.push({
+      label: "Edit caption…",
+      icon: "lucide-pencil",
+      onClick: async () => {
+        const v = await prompt({ title: "Caption", label: "Text", type: "text", value: m.captions[hit.idx].text });
+        if (v !== null && v !== "") applyEdit(() => { m.captions[hit.idx].text = v; metaEdited(); });
+      },
+    });
+    items.push({ label: "Delete caption", icon: "lucide-trash-2", onClick: () => applyEdit(() => { m.captions.splice(hit.idx, 1); select(null); metaEdited(); }) });
   } else if (hit.mode === "keydrag") {
     select({ type: "key", idx: hit.idx });
     items.push({
@@ -1500,6 +1633,14 @@ export function buildContextMenu(ev) {
       onClick: async () => {
         const v = await prompt({ title: "Add keycap hint", label: "Text (e.g. ⌘+Enter)", type: "text", value: "⌘+Enter" });
         if (v !== null && v !== "") addKeyAt(entry, v);
+      },
+    });
+    items.push({
+      label: "Add caption at this time…",
+      icon: "lucide-captions",
+      onClick: async () => {
+        const v = await prompt({ title: "Add caption", label: "Text", type: "text", value: "" });
+        if (v !== null && v !== "") addCaptionAt(entry, v);
       },
     });
   }
@@ -1533,9 +1674,11 @@ export async function loadSegment(name) {
       frames: data.meta.frames.map((f) => ({ ...f })),
       clicks: (data.meta.clicks || []).map((c) => ({ ...c })),
       keys: (data.meta.keys || []).map((k2) => ({ ...k2 })),
+      captions: (data.meta.captions || []).map((c) => ({ ...c })),
       speed: [], trim: { in: 0, out: data.meta.frames.length - 1 },
     };
     meta.speed = meta.speed || [];
+    meta.captions = meta.captions || [];
     meta.trim = meta.trim || { in: 0, out: meta.frames.length - 1 };
     meta.speedRamp = meta.speedRamp ?? RAMP_DEFAULT;
     st = {

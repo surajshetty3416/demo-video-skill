@@ -28,7 +28,8 @@ CTYPES = {".html": "text/html", ".js": "text/javascript", ".css": "text/css",
           ".map": "application/json", ".txt": "text/plain"}
 
 INT_KNOBS = ["PANEL_SCALE", "PANEL_BASE_W", "MARGIN", "RAD", "END_EXTRA", "PULSE_N",
-             "KEY_H", "KEY_INSET", "KEY_N", "CRF", "CURSOR_CSS_H", "SHADOW_ALPHA", "SHADOW_BLUR"]
+             "KEY_H", "KEY_INSET", "KEY_N", "CAP_H", "CRF", "CURSOR_CSS_H",
+             "SHADOW_ALPHA", "SHADOW_BLUR"]
 FLOAT_KNOBS = ["ZOOM_EMA", "PAN_EMA"]
 
 

@@ -22,6 +22,10 @@ meta.json = {"dsf":2, "fps":60, "clip":{"x","y","width","height"},
           Absent (old captures with the DOM cursor baked in) -> no overlay drawn.
   repeat = this captured frame stands for N output frames (written by still();
   the camera keeps easing across the repeats). Old metas without it still work.
+  cap = caption text for this entry (baked by resolve.py from the editor's
+  "captions":[{"from","to","text"}] regions): a rounded ink bar with wrapped
+  text at the bottom of the frame, fading in/out per contiguous run; keycap
+  hints lift above it while both are visible.
 
 Usage:  python compositor.py [WORKDIR]        (WORKDIR defaults to $VIDEO_DIR or cwd)
         HD=1 python compositor.py [WORKDIR]   (on-demand retina output: 2x panel,
@@ -51,6 +55,7 @@ PULSE_COLOR = (10,10,12)  # matches the cursor ink
 KEY_H = 46                # keycap height in output px (scaled by PANEL_SCALE)
 KEY_INSET = 34            # gap between the keycap row and the bottom of the frame
 KEY_N = 58                # frames a shortcut hint stays on screen (~1s)
+CAP_H = 46                # caption line height in output px (scaled by PANEL_SCALE)
 KEY_FONTS = ["/System/Library/Fonts/SFNSRounded.ttf", "/System/Library/Fonts/SFNS.ttf",
              "/System/Library/Fonts/Helvetica.ttc", "/Library/Fonts/Arial Unicode.ttf",
              "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
@@ -205,14 +210,60 @@ def key_sprite(text):
     sp = _keycaps[text] = img.resize((img.width//aa, img.height//aa), Image.LANCZOS)
     return sp
 
-def draw_keys(img, keys):
+def draw_keys(img, keys, lift=0):
     text, age = keys[-1]                     # newest hint wins if two overlap
     a = min(1.0, age/5) * min(1.0, (KEY_N-age)/12)
     if a <= 0: return
     sp = key_sprite(text)
     if a < 1: sp = sp.copy(); sp.putalpha(sp.getchannel("A").point(lambda v: round(v*a)))
     rise = round((1-min(1.0, age/9))*12*PANEL_SCALE)   # eases up into place
+    img.paste(sp, ((BG_W-sp.width)//2, BG_H-KEY_INSET*PANEL_SCALE-sp.height+rise-lift), sp)
+
+# caption bar: a rounded ink panel with wrapped centered text at the bottom of
+# the frame, same rendering discipline as keycaps (3x AA, soft shadow)
+_capsprites = {}
+def cap_sprite(text):
+    sp = _capsprites.get(text)
+    if sp: return sp
+    aa = 3; lh = round(CAP_H*PANEL_SCALE)*aa
+    font = key_font(round(lh*0.5))
+    maxw = round(BG_W*aa*0.72)
+    lines, cur = [], ""
+    for word in text.split():
+        t = (cur + " " + word).strip()
+        b = font.getbbox(t)
+        if cur and b[2]-b[0] > maxw: lines.append(cur); cur = word
+        else: cur = t
+    if cur: lines.append(cur)
+    boxes = [font.getbbox(l) for l in lines]
+    tw = max(b[2]-b[0] for b in boxes)
+    pad_x, pad_y, gap = round(lh*0.55), round(lh*0.24), round(lh*0.08)
+    w, hh = tw + 2*pad_x, len(lines)*lh + (len(lines)-1)*gap + 2*pad_y
+    rad, blur = round(lh*0.42), round(lh*0.13)
+    mrg = 3*blur
+    img = Image.new("RGBA", (w+2*mrg, hh+2*mrg), (0,0,0,0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle([mrg, mrg, mrg+w, mrg+hh], radius=rad, fill=(15,23,42,235))
+    y = mrg + pad_y
+    for l, b in zip(lines, boxes):
+        d.text((mrg + w/2 - (b[0]+b[2])/2, y + lh/2 - (b[1]+b[3])/2), l,
+               font=font, fill=(255,255,255,255))
+        y += lh + gap
+    sh = Image.new("RGBA", img.size, (0,0,0,0))
+    sh.paste((15,23,42,140), (0, round(blur*0.8)),
+             img.getchannel("A").filter(ImageFilter.GaussianBlur(blur)))
+    img = Image.alpha_composite(sh, img)
+    sp = _capsprites[text] = img.resize((img.width//aa, img.height//aa), Image.LANCZOS)
+    return sp
+
+def draw_caption(img, cap):
+    text, a, rise_t = cap
+    if a <= 0: return 0
+    sp = cap_sprite(text)
+    if a < 1: sp = sp.copy(); sp.putalpha(sp.getchannel("A").point(lambda v: round(v*a)))
+    rise = round((1-rise_t)*10*PANEL_SCALE)
     img.paste(sp, ((BG_W-sp.width)//2, BG_H-KEY_INSET*PANEL_SCALE-sp.height+rise), sp)
+    return sp.height
 
 def clamp(v,a,b): return a if v<a else b if v>b else v
 def focus_px(fr): return (fr["cx"]-clip["x"])*dsf, (fr["cy"]-clip["y"])*dsf
@@ -225,7 +276,7 @@ def place(want, span, bound):
 
 _cache = {}
 def render(job):
-    idx, zc, fx, fy, mx, my, pulses, keys = job
+    idx, zc, fx, fy, mx, my, pulses, keys, cap = job
     src = _cache.get(idx)
     if src is None:
         _cache.clear(); src = _cache[idx] = Image.open(srcpath(idx)).convert("RGB")
@@ -257,7 +308,8 @@ def render(job):
         ImageDraw.Draw(m).rounded_rectangle([ox-x0, oy-y0, ox+pw-x0, oy+ph-y0],
                                             radius=max(1,round(RAD*zc)), fill=255)
         out.paste(view, (x0,y0), m)
-    if keys: draw_keys(out, keys)
+    lift = draw_caption(out, cap) if cap else 0
+    if keys: draw_keys(out, keys, lift + 10*PANEL_SCALE if lift else 0)
     # near-lossless handoff to ffmpeg (4:4:4 q96); the x264 pass sets final quality
     b = io.BytesIO(); out.save(b, "JPEG", quality=96, subsampling=0)
     return b.getvalue()
@@ -268,6 +320,17 @@ def main():
     for i, fr in enumerate(frames):
         expanded += [(i, fr)] * fr.get("repeat", 1)
     expanded += [(len(frames)-1, frames[-1])] * END_EXTRA
+
+    # captions come baked per entry ("cap"); fade each contiguous run in/out
+    cap_state, q = [None] * len(expanded), 0
+    while q < len(expanded):
+        text, j = expanded[q][1].get("cap"), q
+        while j < len(expanded) and expanded[j][1].get("cap") == text: j += 1
+        if text:
+            for p in range(q, j):
+                a = min(1.0, (p-q)/8) * min(1.0, (j-p)/8)
+                cap_state[p] = (text, round(a, 3), round(min(1.0, (p-q)/9), 3))
+        q = j
 
     by_entry, keys_by_entry = {}, {}
     for c in meta.get("clicks", []):
@@ -288,9 +351,10 @@ def main():
         zc += (fr["z"]-zc)*ZOOM_EMA
         tfx, tfy = focus_px(fr); fx += (tfx-fx)*PAN_EMA; fy += (tfy-fy)*PAN_EMA
         mx, my = fr.get("mx"), fr.get("my")
-        key = (idx, round(zc,4), round(fx,2), round(fy,2), mx, my, pulses, keys)
+        cap = cap_state[n]
+        key = (idx, round(zc,4), round(fx,2), round(fy,2), mx, my, pulses, keys, cap)
         if key == prev: plan.append(False)
-        else: plan.append(True); jobs.append((idx, zc, fx, fy, mx, my, pulses, keys)); prev = key
+        else: plan.append(True); jobs.append((idx, zc, fx, fy, mx, my, pulses, keys, cap)); prev = key
 
     out = os.path.join(WORKDIR, "demo.mp4")
     log = open(os.path.join(WORKDIR, "ffmpeg.log"), "w")

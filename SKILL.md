@@ -271,7 +271,10 @@ label (click to select, then click the preview to set focus / scroll to zoom, dr
 edges to move transitions), stretchable hold pills (drag the right edge to retime),
 non-destructive speed regions as hatched overlays whose edges feather over the ramp
 width (drag across live frames, stored as `speed:[{from,to,mult}]`), draggable click
-dots / keycap chips, and trim handles. Speed changes ease in and out instead of jumping
+dots / keycap chips, caption regions on the Events lane (stored as
+`captions:[{from,to,text}]`, rendered as a rounded ink bar with wrapped text at the
+bottom of the frame that fades in/out; drag the band to move it, drag its edges to
+retime, right-click to add/edit/delete), and trim handles. Speed changes ease in and out instead of jumping
 at region boundaries: multipliers are smoothed in log space with a raised-cosine kernel
 spanning `speedRamp` seconds (saved in the edited meta, default 0.6, 0 = hard cuts,
 editable in Advanced), identically in the server resolver and the JS preview so the
