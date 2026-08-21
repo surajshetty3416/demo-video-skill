@@ -37,13 +37,20 @@ lands, the editor opens in a new tab automatically.
    python3 editor/server.py --detach --port 8787 ~/demos/takes
    ```
 
-2. Open the tab you want to record, click the extension icon, check the server
-   URL and take name, hit **Start recording**. The popup closes; the REC pill
-   and toolbar badge appear.
-3. Do the demo in the tab.
-4. Click **Stop** on the pill (or the toolbar icon → Stop). Frames streamed
-   during recording, so saving is nearly instant; the segment appears in the
-   editor rail and the editor opens in a new tab.
+2. Open the tab you want to record, click the extension icon, hit **Record**
+   (the popup health-checks the server first — there is nothing to fill in;
+   the take is named after the tab). The popup closes; the REC pill and
+   toolbar badge appear.
+3. Do the demo in the tab. **Pause/Resume** from the popup skips the paused
+   stretch entirely — ingest excises the interval, so it never appears in the
+   video.
+4. Click **Stop** on the pill (or the popup). Frames streamed during
+   recording, so saving is nearly instant; the segment appears in the editor
+   rail and the editor opens in a new tab.
+
+The server URL defaults to `http://127.0.0.1:8787`; to point elsewhere set it
+once from the extension's service-worker console:
+`chrome.storage.local.set({server: "http://127.0.0.1:9999"})`.
 
 Then direct it in the editor: the click-cluster auto-framing gives a first
 pass — reshape, split or flatten the camera blocks, speed up dead air, trim

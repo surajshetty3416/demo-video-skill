@@ -102,6 +102,30 @@ def frame_of(t, t0, n):
     return max(0, min(n - 1, int((t - t0) * FPS / 1000.0)))
 
 
+def pause_map(events):
+    """Pause markers (k:"p"/"r") from the extension excise their interval from
+    the recording's timeline: returns the intervals and a monotonic remapper."""
+    marks = sorted((e["t"], e["k"]) for e in events if e.get("k") in ("p", "r"))
+    ivs, start = [], None
+    for t, k in marks:
+        if k == "p" and start is None:
+            start = t
+        elif k == "r" and start is not None:
+            ivs.append((start, t)); start = None
+    if start is not None:
+        ivs.append((start, float("inf")))    # paused straight into stop
+
+    def eff(t):
+        cut = 0.0
+        for a, b in ivs:
+            if t > b:
+                cut += b - a
+            elif t > a:
+                cut += t - a
+        return t - cut
+    return ivs, eff
+
+
 def cluster_clicks(clicks):
     groups = []
     for f, x, y in clicks:
@@ -272,6 +296,10 @@ def ingest_frames(seg, rec):
     times = json.load(open(os.path.join(seg, "times.json")))
     if not times:
         raise RuntimeError("no frames were streamed")
+    ivs, eff = pause_map(rec.get("events") or [])
+    if ivs:
+        times = [eff(t) for t in times]
+        rec = {**rec, "events": [{**e, "t": eff(e["t"])} for e in rec.get("events") or []]}
     t0 = times[0]
     n = max(1, int((times[-1] - t0) * FPS / 1000.0) + 1)
     grid = [max(0, bisect_right(times, t0 + k * 1000.0 / FPS) - 1) for k in range(n)]

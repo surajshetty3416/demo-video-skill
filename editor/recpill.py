@@ -42,7 +42,7 @@ try:
     root.attributes("-transparent", True)
     BG = "systemTransparent"
 except tk.TclError:
-    BG = "#0f172a"
+    BG = "#191919"
 root.config(bg=BG)
 cv = tk.Canvas(root, width=W, height=H, bg=BG, highlightthickness=0)
 cv.pack()
@@ -52,12 +52,12 @@ def rrect(x0, y0, x1, y1, r, **kw):
            x1 - r, y1, x0 + r, y1, x0, y1, x0, y1 - r, x0, y0 + r, x0, y0]
     return cv.create_polygon(pts, smooth=True, **kw)
 
-body = rrect(0, 0, W, H, 23, fill="#0f172a", outline="")
+body = rrect(0, 0, W, H, 23, fill="#191919", outline="")
 dot = cv.create_oval(18, H / 2 - 5, 28, H / 2 + 5, fill="#dc2626", outline="")
-timer = cv.create_text(40, H / 2, text="0:00", anchor="w", fill="#f8fafc",
+timer = cv.create_text(40, H / 2, text="0:00", anchor="w", fill="#f8f8f8",
                        font=("Helvetica", 14))
-stop_bg = rrect(W - 70, 9, W - 12, H - 9, 14, fill="#334155", outline="")
-stop_tx = cv.create_text(W - 41, H / 2, text="Stop", fill="#f8fafc",
+stop_bg = rrect(W - 70, 9, W - 12, H - 9, 14, fill="#383838", outline="")
+stop_tx = cv.create_text(W - 41, H / 2, text="Stop", fill="#f8f8f8",
                          font=("Helvetica", 12, "bold"))
 
 state = {"stopping": False, "misses": 0, "on": True}

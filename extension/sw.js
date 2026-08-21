@@ -41,6 +41,8 @@ async function handle(msg) {
   switch (msg.cmd) {
     case "start": return start(msg);
     case "stop": return stop();
+    case "pause": return pauseCast();
+    case "resume": return resumeCast();
     case "events": return onLoggerEvents(msg);
     case "rec-started":
       await patch({ phase: "recording", t0: msg.t0 });
@@ -69,7 +71,7 @@ async function start({ streamId, server, name, mode }) {
 
 async function stop() {
   const s = await session();
-  if (!s || !["starting", "recording"].includes(s.phase)) return { ok: true };
+  if (!s || !["starting", "recording", "paused"].includes(s.phase)) return { ok: true };
   clearInterval(stopPoll); stopPoll = null;
   if (s.tabId) chrome.tabs.sendMessage(s.tabId, { cmd: "logger-stop" }).catch(() => {});
   await patch({ phase: "uploading" });
@@ -105,7 +107,7 @@ function injectLogger(tabId) {
 
 chrome.tabs.onUpdated.addListener(async (tabId, info) => {
   const s = await session();
-  if (s && (s.phase === "recording" || s.phase === "starting")
+  if (s && ["recording", "starting", "paused"].includes(s.phase)
       && tabId === s.tabId && info.status === "complete") {
     injectLogger(tabId);
   }
@@ -163,8 +165,9 @@ async function startCast(tab, server, name) {
   }
   const { id } = await r.json();
   frameBuf = []; eventBuf = [];
-  await patch({ phase: "recording", mode: "frames", tabId: tab.id, server, name, id,
-                t0: Date.now(), error: null, segment: null, pillWin: null });
+  await patch({ phase: "recording", mode: "frames", tabId: tab.id, server, name, id, page,
+                t0: Date.now(), pausedMs: 0, pauseStart: null,
+                error: null, segment: null, pillWin: null });
   await chrome.debugger.sendCommand({ tabId: tab.id }, "Page.startScreencast", {
     format: "jpeg", quality: 85, everyNthFrame: 1,
     maxWidth: Math.ceil(page.w * page.dpr), maxHeight: Math.ceil(page.h * page.dpr),
@@ -175,7 +178,7 @@ async function startCast(tab, server, name) {
   // responses carry the flag too, this poll covers fully static pages
   stopPoll = setInterval(async () => {
     const s = lastSession || (await session());
-    if (!s?.id || s.phase !== "recording") return;
+    if (!s?.id || !["recording", "paused"].includes(s.phase)) return;
     const st = await fetch(`${s.server}/api/import/${s.id}/status`)
       .then((r) => r.json()).catch(() => null);
     if (st?.stop) stop();
@@ -196,7 +199,7 @@ chrome.debugger.onEvent.addListener((src, method, params) => {
 
 chrome.debugger.onDetach.addListener(async (src) => {
   const s = await session();
-  if (s?.mode === "frames" && s.phase === "recording" && src.tabId === s.tabId) {
+  if (s?.mode === "frames" && ["recording", "paused"].includes(s.phase) && src.tabId === s.tabId) {
     // banner dismissed or tab closed: salvage what already streamed
     await patch({ phase: "uploading" });
     finishCast(s, true).catch((e) => castError(e));
@@ -205,11 +208,37 @@ chrome.debugger.onDetach.addListener(async (src) => {
 
 async function onLoggerEvents(msg) {
   const s = lastSession || (await session());
-  if (s?.mode === "frames") {
+  if (s?.mode === "frames" && s.phase === "recording") { // paused input is dropped
     eventBuf.push(...msg.batch);
     scheduleFlush();
   }
   return {}; // baked mode: the offscreen document consumes the same message
+}
+
+// pause stops the screencast and stamps a marker; ingest excises the interval
+async function pauseCast() {
+  const s = await session();
+  if (s?.mode !== "frames" || s.phase !== "recording") return {};
+  await chrome.debugger.sendCommand({ tabId: s.tabId }, "Page.stopScreencast").catch(() => {});
+  eventBuf.push({ t: Date.now(), k: "p" });
+  scheduleFlush();
+  await patch({ phase: "paused", pauseStart: Date.now() });
+  badge("II", "#737373");
+  return {};
+}
+
+async function resumeCast() {
+  const s = await session();
+  if (s?.mode !== "frames" || s.phase !== "paused") return {};
+  eventBuf.push({ t: Date.now(), k: "r" });
+  await patch({ phase: "recording",
+                pausedMs: (s.pausedMs || 0) + (Date.now() - s.pauseStart), pauseStart: null });
+  await chrome.debugger.sendCommand({ tabId: s.tabId }, "Page.startScreencast", {
+    format: "jpeg", quality: 85, everyNthFrame: 1,
+    maxWidth: Math.ceil(s.page.w * s.page.dpr), maxHeight: Math.ceil(s.page.h * s.page.dpr),
+  }).catch((e) => castError(e));
+  badge("REC", "#dc2626");
+  return {};
 }
 
 function scheduleFlush() {
