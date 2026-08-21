@@ -60,7 +60,7 @@ stop_bg = rrect(W - 70, 9, W - 12, H - 9, 14, fill="#383838", outline="")
 stop_tx = cv.create_text(W - 41, H / 2, text="Stop", fill="#f8f8f8",
                          font=("Helvetica", 12, "bold"))
 
-state = {"stopping": False, "misses": 0, "on": True}
+state = {"stopping": False, "misses": 0, "on": True, "paused_at": None, "paused_total": 0.0}
 
 def request_stop(_=None):
     if state["stopping"]:
@@ -72,14 +72,22 @@ def request_stop(_=None):
     api("/stop", post=True)
 
 def blink():
-    state["on"] = not state["on"]
-    cv.itemconfigure(dot, fill="#dc2626" if state["on"] else "#7f1d1d")
+    if state["paused_at"] is not None:
+        cv.itemconfigure(dot, fill="#737373")
+    else:
+        state["on"] = not state["on"]
+        cv.itemconfigure(dot, fill="#dc2626" if state["on"] else "#7f1d1d")
     root.after(650, blink)
 
 def tick():
     if not state["stopping"]:
-        s = int(time.time() - T0)
-        cv.itemconfigure(timer, text=f"{s // 60}:{s % 60:02d}")
+        now = time.time()
+        pausing = now - state["paused_at"] if state["paused_at"] is not None else 0.0
+        s = int(now - T0 - state["paused_total"] - pausing)
+        label = f"{s // 60}:{s % 60:02d}"
+        if state["paused_at"] is not None:
+            label += "  ⏸"
+        cv.itemconfigure(timer, text=label)
     root.after(500, tick)
 
 def poll():
@@ -92,6 +100,12 @@ def poll():
         state["misses"] = 0
         if st.get("status") != "recording":
             return root.destroy()
+        paused = bool(st.get("paused"))
+        if paused and state["paused_at"] is None:
+            state["paused_at"] = time.time()
+        elif not paused and state["paused_at"] is not None:
+            state["paused_total"] += time.time() - state["paused_at"]
+            state["paused_at"] = None
     root.after(1000, poll)
 
 drag = {}

@@ -7,36 +7,31 @@
   :root {
     --surface: #ffffff; --surface-field: #f3f3f3; --surface-hover: #ededed;
     --ink: #171717; --ink-8: #383838; --ink-5: #737373;
-    --outline: #e2e2e2;
-    --btn: #171717; --btn-hover: #383838; --btn-ink: #ffffff;
+    --outline: #e2e2e2; --rec: #dc2626;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --surface: #191919; --surface-field: #262626; --surface-hover: #2e2e2e;
       --ink: #f8f8f8; --ink-8: #d4d4d4; --ink-5: #a1a1a1;
-      --outline: #333333;
-      --btn: #f8f8f8; --btn-hover: #d4d4d4; --btn-ink: #171717;
+      --outline: #333333; --rec: #ef4444;
     }
   }
   body {
-    width: 208px; margin: 0; padding: 12px; background: var(--surface); color: var(--ink);
-    font: 13px/1.4 "InterVariable", "Inter", -apple-system, BlinkMacSystemFont,
+    width: 168px; margin: 0; padding: 12px 14px; background: var(--surface); color: var(--ink);
+    font: 12px/1.4 "InterVariable", "Inter", -apple-system, BlinkMacSystemFont,
       "Segoe UI", sans-serif;
   }
-  h1 { margin: 0 0 10px; font-size: 13px; font-weight: 600; color: var(--ink); }
-  .row { display: flex; gap: 8px; }
+  [hidden] { display: none !important; }
+  .row { display: flex; gap: 10px; justify-content: center; }
   button {
-    flex: 1; height: 28px; border: none; border-radius: 8px;
-    background: var(--btn); color: var(--btn-ink); font: inherit; font-weight: 500;
-    cursor: pointer;
+    width: 36px; height: 36px; border: 1px solid var(--outline); border-radius: 50%;
+    background: var(--surface-field); color: var(--ink-8); cursor: pointer;
+    display: flex; align-items: center; justify-content: center; padding: 0;
   }
-  button:hover { background: var(--btn-hover); }
-  button.sub {
-    background: var(--surface-field); color: var(--ink-8);
-    border: 1px solid var(--outline);
-  }
-  button.sub:hover { background: var(--surface-hover); }
-  button:disabled { opacity: 0.55; cursor: default; }
+  button:hover { background: var(--surface-hover); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button svg { display: block; }
+  #rec .dot { fill: var(--rec); }
   #status { margin-top: 8px; font-size: 12px; color: var(--ink-5); text-align: center;
             font-variant-numeric: tabular-nums; }
   #status:empty { display: none; }
@@ -44,10 +39,22 @@
 </style>
 </head>
 <body>
-  <h1>Demo Recorder</h1>
   <div class="row">
-    <button id="pause" class="sub" hidden>Pause</button>
-    <button id="main">Record</button>
+    <button id="rec" title="Record">
+      <svg width="14" height="14" viewBox="0 0 14 14"><circle class="dot" cx="7" cy="7" r="6"/></svg>
+    </button>
+    <button id="pause" title="Pause" hidden>
+      <svg id="icoPause" width="12" height="12" viewBox="0 0 12 12">
+        <rect x="1.5" y="1" width="3.2" height="10" rx="1" fill="currentColor"/>
+        <rect x="7.3" y="1" width="3.2" height="10" rx="1" fill="currentColor"/>
+      </svg>
+      <svg id="icoPlay" width="12" height="12" viewBox="0 0 12 12" hidden>
+        <path d="M2.5 1.2 L10.8 6 L2.5 10.8 Z" fill="currentColor"/>
+      </svg>
+    </button>
+    <button id="stop" title="Stop" hidden>
+      <svg width="12" height="12" viewBox="0 0 12 12"><rect x="1.5" y="1.5" width="9" height="9" rx="1.5" fill="currentColor"/></svg>
+    </button>
   </div>
   <div id="status"></div>
   <script src="popup.js"></script>

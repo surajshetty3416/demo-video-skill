@@ -369,7 +369,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def import_events(self, imp, body):
         with self.imports_lock:
-            imp["events"].extend(body.get("events") or [])
+            evs = body.get("events") or []
+            imp["events"].extend(evs)
+            for e in evs:                      # pause markers drive the pill
+                if e.get("k") == "p": imp["paused"] = True
+                elif e.get("k") == "r": imp["paused"] = False
         self.send(200, {"ok": True})
 
     def import_finish(self, imp, body):
@@ -421,7 +425,8 @@ class Handler(BaseHTTPRequestHandler):
         imp = self.imports.get(name)
         if not imp: return self.send(404, {"error": "unknown import"})
         self.send(200, {"status": imp["status"], "error": imp["error"], "segment": name,
-                        "stop": imp.get("stopRequested", False), "summary": imp.get("summary")})
+                        "stop": imp.get("stopRequested", False),
+                        "paused": imp.get("paused", False), "summary": imp.get("summary")})
 
     def render(self, body):
         segs = discover_segments(self.workdir)

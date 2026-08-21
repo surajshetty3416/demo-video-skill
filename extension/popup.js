@@ -1,10 +1,11 @@
-// One-button recorder: Record / Pause / Stop, nothing to fill in. The server
-// is the stored URL or the default and is health-checked on open; the take
-// name comes from the tab title. Live phase comes from storage.session.
+// Orthodox transport controls: record, pause/resume, stop. Nothing to fill in;
+// the server (stored URL or the default) is health-checked on open and status
+// text only appears when something needs attention (or the timer, while
+// recording). The take is named after the tab.
 
 const $ = (id) => document.getElementById(id);
 const DEFAULT_SERVER = "http://127.0.0.1:8787";
-let timer = null, server = DEFAULT_SERVER, serverOk = false;
+let timer = null, server = DEFAULT_SERVER, serverOk = true;
 
 function status(text, err) {
   $("status").textContent = text || "";
@@ -20,40 +21,45 @@ function fmt(ms) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
+function show(rec, pause, stop) {
+  $("rec").hidden = !rec;
+  $("pause").hidden = !pause;
+  $("stop").hidden = !stop;
+}
+
 async function render() {
   const s = await getSession();
   clearInterval(timer);
-  const main = $("main"), pause = $("pause");
-  pause.hidden = true;
-  main.disabled = false;
+  $("rec").disabled = $("stop").disabled = false;
   const phase = s?.phase;
   if (phase === "starting") {
-    main.textContent = "Starting…";
-    main.disabled = true;
+    show(true, false, false);
+    $("rec").disabled = true;
+    status("Starting…");
   } else if (phase === "recording" || phase === "paused") {
-    pause.hidden = false;
-    pause.textContent = phase === "paused" ? "Resume" : "Pause";
-    main.textContent = "Stop";
+    show(false, true, true);
+    const paused = phase === "paused";
+    $("icoPause").toggleAttribute("hidden", paused);   // SVG has no .hidden property
+    $("icoPlay").toggleAttribute("hidden", !paused);
+    $("pause").title = paused ? "Resume" : "Pause";
     const tick = () => {
       const now = Date.now();
-      const pausing = phase === "paused" ? now - s.pauseStart : 0;
-      const label = phase === "paused" ? "Paused" : "Recording";
-      status(`${label} ${fmt(now - s.t0 - (s.pausedMs || 0) - pausing)}`);
+      const pausing = paused ? now - s.pauseStart : 0;
+      status(`${paused ? "Paused" : "Recording"} ${fmt(now - s.t0 - (s.pausedMs || 0) - pausing)}`);
     };
     tick();
-    timer = setInterval(tick, 500);
+    if (!paused) timer = setInterval(tick, 500);
   } else if (phase === "uploading" || phase === "converting") {
-    main.textContent = phase === "uploading" ? "Saving…" : "Converting…";
-    main.disabled = true;
-    status("");
+    show(false, false, true);
+    $("stop").disabled = true;
+    status(phase === "uploading" ? "Saving…" : "Converting…");
   } else if (phase === "error") {
-    main.textContent = "Record";
+    show(true, false, false);
     status(s.error || "Recording failed", true);
   } else {
-    main.textContent = "Record";
-    main.disabled = !serverOk;
-    status(serverOk ? "Server connected"
-                    : `Server not running at ${server.replace(/^https?:\/\//, "")}`, !serverOk);
+    show(true, false, false);
+    $("rec").disabled = !serverOk;
+    status(serverOk ? "" : `Server not running at ${server.replace(/^https?:\/\//, "")}`, true);
   }
 }
 
@@ -71,21 +77,20 @@ async function checkServer() {
     render();
 }
 
-$("main").addEventListener("click", async () => {
-  const s = await getSession();
-  if (s && ["recording", "paused"].includes(s.phase)) {
-    $("main").disabled = true;
-    await chrome.runtime.sendMessage({ cmd: "stop" });
-  } else {
-    const r = await chrome.runtime.sendMessage({ cmd: "start", server, name: "", mode: "frames" });
-    if (r?.error) return status(r.error, true);
-    window.close();
-  }
+$("rec").addEventListener("click", async () => {
+  const r = await chrome.runtime.sendMessage({ cmd: "start", server, name: "", mode: "frames" });
+  if (r?.error) return status(r.error, true);
+  window.close();
 });
 
 $("pause").addEventListener("click", async () => {
   const s = await getSession();
   await chrome.runtime.sendMessage({ cmd: s?.phase === "paused" ? "resume" : "pause" });
+});
+
+$("stop").addEventListener("click", async () => {
+  $("stop").disabled = true;
+  await chrome.runtime.sendMessage({ cmd: "stop" });
 });
 
 chrome.storage.session.onChanged.addListener(render);

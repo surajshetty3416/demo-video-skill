@@ -208,7 +208,7 @@ chrome.debugger.onDetach.addListener(async (src) => {
 
 async function onLoggerEvents(msg) {
   const s = lastSession || (await session());
-  if (s?.mode === "frames" && s.phase === "recording") { // paused input is dropped
+  if (s?.mode === "frames" && s.phase !== "paused") { // only paused input is dropped
     eventBuf.push(...msg.batch);
     scheduleFlush();
   }
