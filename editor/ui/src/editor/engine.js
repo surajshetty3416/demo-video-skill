@@ -232,7 +232,7 @@ export function resolveMeta(m) {
   const capText = new Array(frames.length).fill(null); // later regions win, like resolve.py
   for (const c of m.captions || [])
     for (let i = Math.max(0, c.from); i < Math.min(frames.length, c.to); i++)
-      capText[i] = { text: c.text, top: c.pos === "top" };
+      capText[i] = { text: c.text, top: c.pos === "top", x: c.x ?? null, y: c.y ?? null };
   return { frames, reps, kept, hideCur, capText, clicks: remap(m.clicks), keys: remap(m.keys) };
 }
 
@@ -508,8 +508,8 @@ function drawCaptionHud(ctx, pf, g, K) {
   const e = state.path.srcEntry[clamp(Math.round(pf), 0, state.path.total - 1)];
   const cap = capText[e];
   if (!cap) return 0;
-  const { text, top } = cap;
-  const same = (c) => c && c.text === text && c.top === top;
+  const { text, top, x: fx, y: fy } = cap;
+  const same = (c) => c && c.text === text && c.top === top && c.x === fx && c.y === fy;
   let i0 = e, i1 = e;
   while (i0 > 0 && same(capText[i0 - 1])) i0--;
   while (i1 < capText.length - 1 && same(capText[i1 + 1])) i1++;
@@ -540,9 +540,16 @@ function drawCaptionHud(ctx, pf, g, K) {
   const padX = lh * 0.55, padY = lh * 0.24, gap = lh * 0.08;
   const w = tw + 2 * padX, h = lines.length * lh + (lines.length - 1) * gap + 2 * padY;
   const slide = (1 - Math.min(1, age / 9)) * 10 * g.PS * K;
-  const x = (g.BW * K - w) / 2;
-  const y = top ? k.KEY_INSET * g.PS * K - slide
-              : g.BH * K - k.KEY_INSET * g.PS * K - h + slide;
+  let x, y;
+  if (fx != null) {                     // freely placed: (fx,fy) = bar centre fractions
+    const pad = 8 * g.PS * K;
+    x = clamp(fx * g.BW * K - w / 2, pad, g.BW * K - pad - w);
+    y = clamp(fy * g.BH * K - h / 2 + slide, pad, g.BH * K - pad - h);
+  } else {
+    x = (g.BW * K - w) / 2;
+    y = top ? k.KEY_INSET * g.PS * K - slide
+            : g.BH * K - k.KEY_INSET * g.PS * K - h + slide;
+  }
   ctx.shadowColor = "rgba(15,23,42,0.55)";
   ctx.shadowBlur = lh * 0.3; ctx.shadowOffsetY = lh * 0.1;
   ctx.fillStyle = "rgba(15,23,42,0.92)";
@@ -551,9 +558,9 @@ function drawCaptionHud(ctx, pf, g, K) {
   ctx.shadowColor = "transparent";
   ctx.fillStyle = "#fff";
   lines.forEach((l, i) =>
-    ctx.fillText(l, g.BW * K / 2, y + padY + i * (lh + gap) + lh / 2 + lh * 0.02));
+    ctx.fillText(l, x + w / 2, y + padY + i * (lh + gap) + lh / 2 + lh * 0.02));
   ctx.restore();
-  return top ? 0 : h; // keycaps only lift past a bottom caption
+  return top || fx != null ? 0 : h; // keycaps only lift past a default bottom caption
 }
 
 function drawKeyHud(ctx, pf, g, K, lift = 0) {
@@ -1202,7 +1209,14 @@ export function tlPointerUp() {
     case "speedsel-existing": select({ type: "speed", idx: drag.idx }); break;
     case "clickdrag": select({ type: "click", idx: drag.idx }); break;
     case "keydrag": select({ type: "key", idx: drag.idx }); break;
-    case "capdrag": case "capedgeL": case "capedgeR": select({ type: "caption", idx: drag.idx }); break;
+    case "capdrag": case "capedgeL": case "capedgeR": {
+      select({ type: "caption", idx: drag.idx });
+      const cp = m.captions[drag.idx];
+      const e = playheadEntry();
+      if (cp && (e < cp.from || e >= cp.to))   // show the bar so it can be placed
+        setPlayhead(editedToResolved(state.eStarts[clamp(cp.from, 0, m.frames.length - 1)] + 10));
+      break;
+    }
     case "speedsel": {
       const a = Math.min(drag.a, drag.b), b = Math.max(drag.a, drag.b);
       if (drag.moved && b - a >= 1) {
@@ -1269,6 +1283,7 @@ export function pathKnobsEdited() {
 /* ---------- preview interaction ---------- */
 export function previewPointerDown(ev) {
   const sel = ui.sel;
+  if (sel?.type === "caption") return placeCaption(ev, sel.idx);
   if (!sel || sel.type !== "cam" || !state.lastGeom) return;
   const b = blockContaining(sel.entry);
   if (!b) return;
@@ -1285,6 +1300,32 @@ export function previewPointerDown(ev) {
     metaEdited();
   });
 }
+// select a caption on the timeline, then click/drag the preview to place it
+// freely; the bar centre is stored as frame fractions (x,y), cleared by the
+// Position submenu's Bottom/Top presets
+function placeCaption(ev, idx) {
+  ev.preventDefault();
+  const rect = cvs.preview.getBoundingClientRect();
+  beginGesture();
+  const setPos = (e) => {
+    const cp = state.meta.captions[idx];
+    if (!cp) return;
+    cp.x = Math.round(clamp((e.clientX - rect.left) / rect.width, 0.02, 0.98) * 1000) / 1000;
+    cp.y = Math.round(clamp((e.clientY - rect.top) / rect.height, 0.02, 0.98) * 1000) / 1000;
+    delete cp.pos;
+    metaEdited();
+  };
+  setPos(ev);
+  const move = (e) => setPos(e);
+  const up = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    commitGesture();
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+
 let wheelTimer = null;
 export function previewWheel(ev) {
   const sel = ui.sel;
@@ -1624,17 +1665,21 @@ export function buildContextMenu(ev) {
         if (v !== null && v !== "") applyEdit(() => { m.captions[hit.idx].text = v; metaEdited(); });
       },
     });
+    const cp = m.captions[hit.idx];
+    const free = cp.x != null;
     const setPos = (pos) => () => applyEdit(() => {
-      if (pos === "top") m.captions[hit.idx].pos = "top";
-      else delete m.captions[hit.idx].pos;
+      delete cp.x; delete cp.y;
+      if (pos === "top") cp.pos = "top";
+      else delete cp.pos;
       metaEdited();
     });
     items.push({
       label: "Position",
       icon: "lucide-arrow-up-down",
       submenu: [
-        { label: `Bottom${m.captions[hit.idx].pos !== "top" ? " ✓" : ""}`, onClick: setPos("bottom") },
-        { label: `Top${m.captions[hit.idx].pos === "top" ? " ✓" : ""}`, onClick: setPos("top") },
+        { label: `Bottom${!free && cp.pos !== "top" ? " ✓" : ""}`, onClick: setPos("bottom") },
+        { label: `Top${!free && cp.pos === "top" ? " ✓" : ""}`, onClick: setPos("top") },
+        { label: `Custom: drag on the preview${free ? " ✓" : ""}`, disabled: true },
       ],
     });
     items.push({ label: "Delete caption", icon: "lucide-trash-2", onClick: () => applyEdit(() => { m.captions.splice(hit.idx, 1); select(null); metaEdited(); }) });

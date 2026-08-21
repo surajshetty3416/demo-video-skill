@@ -83,6 +83,10 @@ def resolve_meta(m):
                 frames[i]["capTop"] = True
             else:
                 frames[i].pop("capTop", None)
+            if c.get("x") is not None and c.get("y") is not None:
+                frames[i]["capX"], frames[i]["capY"] = float(c["x"]), float(c["y"])
+            else:
+                frames[i].pop("capX", None); frames[i].pop("capY", None)
     out = {"dsf": m["dsf"], "fps": m.get("fps", 60), "clip": m["clip"], "frames": frames}
     for key in ("clicks", "keys"):
         evts = []

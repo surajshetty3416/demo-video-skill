@@ -257,11 +257,17 @@ def cap_sprite(text):
     return sp
 
 def draw_caption(img, cap):
-    text, a, rise_t, top = cap
+    text, a, rise_t, top, fx, fy = cap
     if a <= 0: return 0
     sp = cap_sprite(text)
     if a < 1: sp = sp.copy(); sp.putalpha(sp.getchannel("A").point(lambda v: round(v*a)))
     slide = round((1-rise_t)*10*PANEL_SCALE)
+    if fx is not None:                       # freely placed: (fx,fy) = bar centre
+        pad = 8*PANEL_SCALE                  # as fractions of the output frame
+        x0 = clamp(round(fx*BG_W - sp.width/2), pad, BG_W - pad - sp.width)
+        y0 = clamp(round(fy*BG_H - sp.height/2) + slide, pad, BG_H - pad - sp.height)
+        img.paste(sp, (x0, y0), sp)
+        return 0
     y = KEY_INSET*PANEL_SCALE - slide if top else BG_H-KEY_INSET*PANEL_SCALE-sp.height+slide
     img.paste(sp, ((BG_W-sp.width)//2, y), sp)
     return 0 if top else sp.height    # keycaps only need lifting past a bottom caption
@@ -322,16 +328,17 @@ def main():
         expanded += [(i, fr)] * fr.get("repeat", 1)
     expanded += [(len(frames)-1, frames[-1])] * END_EXTRA
 
-    # captions come baked per entry ("cap"/"capTop"); fade each run in/out
-    cap_of = lambda fr: (fr.get("cap"), bool(fr.get("capTop")))
+    # captions come baked per entry (cap/capTop/capX/capY); fade each run in/out
+    cap_of = lambda fr: (fr.get("cap"), bool(fr.get("capTop")), fr.get("capX"), fr.get("capY"))
     cap_state, q = [None] * len(expanded), 0
     while q < len(expanded):
-        (text, top), j = cap_of(expanded[q][1]), q
-        while j < len(expanded) and cap_of(expanded[j][1]) == (text, top): j += 1
-        if text:
+        ck, j = cap_of(expanded[q][1]), q
+        while j < len(expanded) and cap_of(expanded[j][1]) == ck: j += 1
+        if ck[0]:
             for p in range(q, j):
                 a = min(1.0, (p-q)/8) * min(1.0, (j-p)/8)
-                cap_state[p] = (text, round(a, 3), round(min(1.0, (p-q)/9), 3), top)
+                cap_state[p] = (ck[0], round(a, 3), round(min(1.0, (p-q)/9), 3),
+                                ck[1], ck[2], ck[3])
         q = j
 
     by_entry, keys_by_entry = {}, {}

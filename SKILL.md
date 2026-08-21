@@ -274,9 +274,11 @@ non-destructive speed regions as hatched overlays whose edges feather over the r
 width (drag across live frames, stored as `speed:[{from,to,mult}]`), draggable click
 dots / keycap chips, caption regions on the Events lane (stored as
 `captions:[{from,to,text}]`, rendered as a rounded ink bar with wrapped text at the
-bottom of the frame that fades in/out, or at the top via each caption's right-click
-Position submenu, with a Caption size preset in the inspector; drag the band to move
-it, drag its edges to retime, right-click to add/edit/delete, or the + button on the
+bottom of the frame that fades in/out, at the top via each caption's right-click
+Position submenu, or anywhere: with the caption selected, click/drag the preview to
+place the bar freely (stored as frame-fraction x/y on the region; Bottom/Top presets
+clear it). A Caption size preset lives in the inspector. Drag the band to move it,
+drag its edges to retime, right-click to add/edit/delete, or the + button on the
 Events gutter to add one at the playhead), and trim handles. Speed changes ease in and out instead of jumping
 at region boundaries: multipliers are smoothed in log space with a raised-cosine kernel
 spanning `speedRamp` seconds (saved in the edited meta, default 0.6, 0 = hard cuts,
